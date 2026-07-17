@@ -42,10 +42,10 @@ npx expo run:android
 
 ```bash
 cd android
-./gradlew assembleDebug
+./gradlew assembleRelease
 ```
 
-APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`。
+可独立运行的 APK 输出到 `android/app/build/outputs/apk/release/app-release.apk`，JavaScript 会直接打包进 APK，不需要连接 Metro 开发服务器。
 
 ## 生成可分发版本
 
