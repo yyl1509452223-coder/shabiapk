@@ -815,8 +815,6 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
   const [offsetY, setOffsetY] = useState(0);
   const [busy, setBusy] = useState(false);
   const [customEditorVisible, setCustomEditorVisible] = useState(false);
-  const [readinessVisible, setReadinessVisible] = useState(false);
-  const [readiness, setReadiness] = useState<WallpaperReadiness | null>(null);
   const player = useVideoPlayer(item.videoUri, (instance) => {
     instance.loop = true;
     instance.muted = true;
@@ -829,6 +827,7 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
       if (Platform.OS !== 'android' || !VideoWallpaper.isSupported()) {
         throw new Error('这台设备不支持 Android 动态壁纸。');
       }
+      await VideoWallpaper.prepareVideoWallpaper(item.videoUri, item.previewUri ?? null);
       const options: WallpaperOptions = { uri: item.videoUri, scaleMode, zoom, offsetX, offsetY, target: 'home' };
       await VideoWallpaper.setVideoWallpaper(
         options.uri,
@@ -845,18 +844,11 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
     }
   };
 
-  const refreshReadiness = useCallback(() => {
-    try {
-      setReadiness(VideoWallpaper.getReadiness());
-    } catch (error) {
-      Alert.alert('检测失败', messageOf(error));
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      void VideoWallpaper.prepareVideoWallpaper(item.videoUri, item.previewUri ?? null);
     }
-  }, []);
-
-  const apply = () => {
-    refreshReadiness();
-    setReadinessVisible(true);
-  };
+  }, [item.previewUri, item.videoUri]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -869,13 +861,6 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
     });
     return () => subscription.remove();
   }, [customEditorVisible, onBack]);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && readinessVisible) refreshReadiness();
-    });
-    return () => subscription.remove();
-  }, [readinessVisible, refreshReadiness]);
 
   if (customEditorVisible) {
     return (
@@ -937,121 +922,122 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
           )}
         </View>
 
-        <Pressable disabled={busy} onPress={apply} style={[styles.applyButton, busy && styles.disabled]}>
-          {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.applyButtonText}>检查并打开系统预览</Text>}
+        <Pressable disabled={busy} onPress={() => void openSystemPreview()} style={[styles.applyButton, busy && styles.disabled]}>
+          {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.applyButtonText}>打开系统预览并启用</Text>}
         </Pressable>
         <Text style={styles.systemNote}>桌面、锁屏或同时应用，会在安卓最后的“设置壁纸”步骤中选择。</Text>
       </ScrollView>
-
-      <Modal
-        animationType="fade"
-        onRequestClose={() => setReadinessVisible(false)}
-        transparent
-        visible={readinessVisible}
-      >
-        <SafeAreaView edges={['top', 'bottom']} style={styles.permissionModalRoot}>
-          <Pressable onPress={() => setReadinessVisible(false)} style={styles.permissionBackdrop} />
-          <View style={styles.permissionSheet}>
-            <View style={styles.permissionHeader}>
-              <View style={styles.flex}>
-                <Text style={styles.permissionTitle}>启用前运行检查</Text>
-                <Text style={styles.permissionCaption}>完成必要设置后，再进入安卓动态壁纸预览。</Text>
-              </View>
-              <Pressable onPress={() => setReadinessVisible(false)} style={styles.permissionCloseButton}>
-                <Text style={styles.permissionCloseText}>×</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.permissionList}>
-              <PermissionCheckRow
-                label="动态壁纸服务"
-                ok={readiness?.wallpaperSupported === true}
-                status={readiness?.wallpaperSupported ? '系统支持' : '系统不支持'}
-              />
-              <PermissionCheckRow
-                label="设置壁纸权限"
-                ok={readiness?.setWallpaperAllowed === true}
-                status={readiness?.setWallpaperAllowed ? '已允许' : '当前被系统限制'}
-              />
-              <PermissionCheckRow
-                label="后台电池限制"
-                ok={readiness?.batteryOptimizationIgnored === true}
-                status={readiness?.batteryOptimizationIgnored ? '已设为不限制' : '建议设为不限制'}
-                warning={readiness?.batteryOptimizationIgnored === false}
-              />
-              <PermissionCheckRow
-                label="锁屏显示、后台启动"
-                manual
-                status="需在手机系统中手动确认"
-              />
-            </View>
-
-            <View style={styles.permissionButtonRow}>
-              <Pressable onPress={() => void VideoWallpaper.openAppSettings()} style={styles.permissionSecondaryButton}>
-                <Text style={styles.permissionSecondaryText}>应用设置</Text>
-              </Pressable>
-              <Pressable onPress={() => void VideoWallpaper.openBatterySettings()} style={styles.permissionSecondaryButton}>
-                <Text style={styles.permissionSecondaryText}>电池设置</Text>
-              </Pressable>
-              <Pressable onPress={refreshReadiness} style={styles.permissionSecondaryButton}>
-                <Text style={styles.permissionSecondaryText}>重新检测</Text>
-              </Pressable>
-            </View>
-
-            <Pressable
-              disabled={!readiness?.wallpaperSupported || !readiness?.setWallpaperAllowed || busy}
-              onPress={() => {
-                setReadinessVisible(false);
-                setTimeout(() => void openSystemPreview(), 180);
-              }}
-              style={[
-                styles.permissionContinueButton,
-                (!readiness?.wallpaperSupported || !readiness?.setWallpaperAllowed || busy) && styles.disabled,
-              ]}
-            >
-              <Text style={styles.permissionContinueText}>继续打开系统预览</Text>
-            </Pressable>
-            <Text style={styles.permissionFootnote}>不同品牌手机的附加权限名称不同，应用无法自动替你开启。</Text>
-          </View>
-        </SafeAreaView>
-      </Modal>
     </View>
   );
 }
 
 function PermissionCheckRow({
+  actionLabel,
   label,
-  manual = false,
+  onAction,
   ok = false,
   status,
-  warning = false,
 }: {
+  actionLabel?: string;
   label: string;
-  manual?: boolean;
+  onAction?: () => void;
   ok?: boolean;
   status: string;
-  warning?: boolean;
 }) {
-  const glyph = manual ? '!' : ok ? '✓' : '×';
   return (
     <View style={styles.permissionRow}>
       <View style={[
         styles.permissionStatusIcon,
         ok && styles.permissionStatusOk,
-        warning && styles.permissionStatusWarning,
-        manual && styles.permissionStatusManual,
       ]}>
-        <Text style={styles.permissionStatusGlyph}>{glyph}</Text>
+        <Text style={styles.permissionStatusGlyph}>{ok ? '✓' : '!'}</Text>
       </View>
       <View style={styles.flex}>
         <Text style={styles.permissionRowLabel}>{label}</Text>
         <Text style={[
           styles.permissionRowStatus,
           ok && styles.permissionRowStatusOk,
-          warning && styles.permissionRowStatusWarning,
         ]}>{status}</Text>
       </View>
+      {!!onAction && (
+        <Pressable onPress={onAction} style={styles.permissionRowButton}>
+          <Text style={styles.permissionRowButtonText}>{actionLabel ?? '去设置'}</Text>
+        </Pressable>
+      )}
     </View>
+  );
+}
+
+function StartupPermissionModal({
+  onClose,
+  onOpenSetting,
+  onRefresh,
+  readiness,
+  visible,
+}: {
+  onClose: () => void;
+  onOpenSetting: (kind: 'lockScreen' | 'overlay' | 'wallpaper') => void;
+  onRefresh: () => void;
+  readiness: WallpaperReadiness | null;
+  visible: boolean;
+}) {
+  const lockScreenOk = readiness?.lockScreenDisplayAllowed === true;
+  const overlayOk = readiness?.overlayAllowed === true;
+  const wallpaperOk = readiness?.wallpaperServiceReady === true;
+  const deviceName = [readiness?.manufacturer, readiness?.model].filter(Boolean).join(' ');
+
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
+      <SafeAreaView edges={['top', 'bottom']} style={styles.permissionModalRoot}>
+        <Pressable onPress={onClose} style={styles.permissionBackdrop} />
+        <View style={styles.permissionSheet}>
+          <View style={styles.permissionHeader}>
+            <View style={styles.flex}>
+              <Text style={styles.permissionTitle}>完成必要权限设置</Text>
+              <Text style={styles.permissionCaption}>
+                {deviceName ? `已识别：${deviceName}` : '正在识别手机型号…'}，只会提示尚未开启的项目。
+              </Text>
+            </View>
+            <Pressable onPress={onClose} style={styles.permissionCloseButton}>
+              <Text style={styles.permissionCloseText}>×</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.permissionList}>
+            <PermissionCheckRow
+              label="锁屏显示"
+              ok={lockScreenOk}
+              onAction={!lockScreenOk ? () => onOpenSetting('lockScreen') : undefined}
+              status={readiness?.lockScreenDisplayRequired === false
+                ? '此机型不需要单独开启'
+                : lockScreenOk ? '已开启' : '未开启'}
+            />
+            <PermissionCheckRow
+              label="显示悬浮窗"
+              ok={overlayOk}
+              onAction={!overlayOk ? () => onOpenSetting('overlay') : undefined}
+              status={overlayOk ? '已开启' : '未开启'}
+            />
+            <PermissionCheckRow
+              label="动态壁纸服务"
+              ok={wallpaperOk}
+              onAction={!wallpaperOk ? () => onOpenSetting('wallpaper') : undefined}
+              status={wallpaperOk ? '服务正常' : '系统限制或服务未启用'}
+            />
+          </View>
+
+          <View style={styles.permissionFooterRow}>
+            <Pressable onPress={onClose} style={styles.permissionLaterButton}>
+              <Text style={styles.permissionLaterText}>稍后处理</Text>
+            </Pressable>
+            <Pressable onPress={onRefresh} style={styles.permissionRefreshButton}>
+              <Text style={styles.permissionRefreshText}>重新检测</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.permissionFootnote}>全部开启后，下次启动不会再提示；设置壁纸时也不会重复弹出。</Text>
+        </View>
+      </SafeAreaView>
+    </Modal>
   );
 }
 
@@ -1081,6 +1067,23 @@ function AppContent() {
   const [selected, setSelected] = useState<WallpaperItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [downloadState, setDownloadState] = useState<DownloadUiState>(INITIAL_DOWNLOAD_STATE);
+  const [startupReadiness, setStartupReadiness] = useState<WallpaperReadiness | null>(null);
+  const [startupPermissionVisible, setStartupPermissionVisible] = useState(false);
+
+  const refreshStartupPermissions = useCallback((showWhenMissing = true) => {
+    if (Platform.OS !== 'android') return;
+    try {
+      const next = VideoWallpaper.getReadiness();
+      setStartupReadiness(next);
+      if (next.allRequiredReady) {
+        setStartupPermissionVisible(false);
+      } else if (showWhenMissing) {
+        setStartupPermissionVisible(true);
+      }
+    } catch (error) {
+      if (showWhenMissing) Alert.alert('权限检测失败', messageOf(error));
+    }
+  }, []);
 
   const refreshLibrary = useCallback(async () => {
     setRefreshing(true);
@@ -1098,8 +1101,16 @@ function AppContent() {
       setLibrary(savedLibrary);
       if (!savedSettings.serverUrl || !savedSettings.accessKey) setTab('settings');
       setReady(true);
+      refreshStartupPermissions(true);
     })();
-  }, []);
+  }, [refreshStartupPermissions]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && startupPermissionVisible) refreshStartupPermissions(true);
+    });
+    return () => subscription.remove();
+  }, [refreshStartupPermissions, startupPermissionVisible]);
 
   useEffect(() => {
     if (selected) return;
@@ -1198,6 +1209,17 @@ function AppContent() {
         {tab === 'settings' && <SettingsScreen onSaved={setSettings} settings={settings} />}
         <BottomNavigation onChange={setTab} tab={tab} />
       </View>
+      <StartupPermissionModal
+        onClose={() => setStartupPermissionVisible(false)}
+        onOpenSetting={(kind) => {
+          void VideoWallpaper.openPermissionSettings(kind).catch((error: unknown) => {
+            Alert.alert('无法打开权限设置', messageOf(error));
+          });
+        }}
+        onRefresh={() => refreshStartupPermissions(true)}
+        readiness={startupReadiness}
+        visible={startupPermissionVisible}
+      />
     </SafeAreaView>
   );
 }
@@ -1361,12 +1383,13 @@ const styles = StyleSheet.create({
   permissionRowLabel: { color: colors.text, fontSize: 13, fontWeight: '800' },
   permissionRowStatus: { color: colors.red, fontSize: 11, marginTop: 2 },
   permissionRowStatusOk: { color: colors.green },
-  permissionRowStatusWarning: { color: '#A96905' },
-  permissionButtonRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  permissionSecondaryButton: { flex: 1, minHeight: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.purpleSoft, paddingHorizontal: 6 },
-  permissionSecondaryText: { color: colors.primaryDark, fontSize: 11, fontWeight: '800' },
-  permissionContinueButton: { minHeight: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary, marginTop: 11 },
-  permissionContinueText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
+  permissionRowButton: { minWidth: 62, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.purpleSoft, paddingHorizontal: 10 },
+  permissionRowButtonText: { color: colors.primaryDark, fontSize: 11, fontWeight: '900' },
+  permissionFooterRow: { flexDirection: 'row', gap: 9, marginTop: 12 },
+  permissionLaterButton: { flex: 1, minHeight: 46, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.panelSoft },
+  permissionLaterText: { color: colors.muted, fontSize: 13, fontWeight: '800' },
+  permissionRefreshButton: { flex: 1, minHeight: 46, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
+  permissionRefreshText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
   permissionFootnote: { color: colors.muted, fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 8 },
   browserSafeArea: { flex: 1, backgroundColor: colors.primaryDark },
   browserHeader: { minHeight: 64, paddingHorizontal: 16, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.primaryDark },
