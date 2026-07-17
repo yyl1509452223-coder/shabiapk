@@ -54,26 +54,38 @@ class VideoWallpaperModule : Module() {
       val component = ComponentName(context, VideoWallpaperService::class.java)
       val directPreviewIntent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
         putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, component)
+        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
       }
-      val chooserIntent = Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER)
+      val chooserIntent = Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER).apply {
+        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      }
+      val systemPickerIntent = Intent(Intent.ACTION_SET_WALLPAPER).apply {
+        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      }
       val activity = appContext.throwingActivity
 
-      // Do not rely on resolveActivity here. Android 11+ package visibility and some
-      // OEM launchers may report no resolver even though the system activity can open.
+      var openedBy = "direct"
       try {
         activity.startActivity(directPreviewIntent)
-      } catch (_: Exception) {
+      } catch (_: ActivityNotFoundException) {
         try {
           activity.startActivity(chooserIntent)
-        } catch (fallbackError: Exception) {
-          throw ActivityNotFoundException("系统无法打开动态壁纸预览").apply {
-            initCause(fallbackError)
+          openedBy = "liveChooser"
+        } catch (_: ActivityNotFoundException) {
+          try {
+            activity.startActivity(systemPickerIntent)
+            openedBy = "systemPicker"
+          } catch (fallbackError: Exception) {
+            throw ActivityNotFoundException("系统无法打开壁纸设置，请从系统设置进入动态壁纸列表").apply {
+              initCause(fallbackError)
+            }
           }
         }
       }
 
       mapOf(
         "opened" to true,
+        "openedBy" to openedBy,
         "requestedTarget" to safeTarget,
         "directTargetSelection" to false
       )
