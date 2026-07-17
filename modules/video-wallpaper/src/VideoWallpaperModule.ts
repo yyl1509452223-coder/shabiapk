@@ -9,16 +9,21 @@ export type SetWallpaperResult = {
 };
 
 export type WallpaperReadiness = {
-  wallpaperSupported: boolean;
-  setWallpaperAllowed: boolean;
-  batteryOptimizationIgnored: boolean;
+  manufacturer: string;
+  model: string;
+  lockScreenDisplayRequired: boolean;
+  lockScreenDisplayAllowed: boolean;
+  overlayAllowed: boolean;
+  wallpaperServiceReady: boolean;
+  allRequiredReady: boolean;
 };
 
 declare class VideoWallpaperModule extends NativeModule<{}> {
   isSupported(): boolean;
   getReadiness(): WallpaperReadiness;
   openAppSettings(): Promise<void>;
-  openBatterySettings(): Promise<void>;
+  openPermissionSettings(kind: 'lockScreen' | 'overlay' | 'wallpaper'): Promise<void>;
+  prepareVideoWallpaper(uri: string, fallbackPreviewUri: string | null): Promise<boolean>;
   setVideoWallpaper(
     uri: string,
     scaleMode: WallpaperOptions['scaleMode'],
