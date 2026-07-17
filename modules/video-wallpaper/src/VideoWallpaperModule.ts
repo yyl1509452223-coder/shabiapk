@@ -3,6 +3,7 @@ import type { WallpaperOptions } from '../../../src/types';
 
 export type SetWallpaperResult = {
   opened: boolean;
+  openedBy: 'direct' | 'liveChooser' | 'systemPicker';
   requestedTarget: WallpaperOptions['target'];
   directTargetSelection: false;
 };
