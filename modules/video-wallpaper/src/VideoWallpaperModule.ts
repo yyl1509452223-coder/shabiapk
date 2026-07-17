@@ -8,8 +8,17 @@ export type SetWallpaperResult = {
   directTargetSelection: false;
 };
 
+export type WallpaperReadiness = {
+  wallpaperSupported: boolean;
+  setWallpaperAllowed: boolean;
+  batteryOptimizationIgnored: boolean;
+};
+
 declare class VideoWallpaperModule extends NativeModule<{}> {
   isSupported(): boolean;
+  getReadiness(): WallpaperReadiness;
+  openAppSettings(): Promise<void>;
+  openBatterySettings(): Promise<void>;
   setVideoWallpaper(
     uri: string,
     scaleMode: WallpaperOptions['scaleMode'],
