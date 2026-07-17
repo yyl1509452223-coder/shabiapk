@@ -3,11 +3,14 @@ package expo.modules.videowallpaper
 import android.content.Context
 import android.graphics.Matrix
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
 import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.MatrixTransformation
@@ -57,7 +60,7 @@ class VideoWallpaperService : WallpaperService() {
       super.onDestroy()
     }
 
-    private fun startPlayer(holder: SurfaceHolder, width: Int, height: Int) {
+    private fun startPlayer(holder: SurfaceHolder, width: Int, height: Int, allowEffects: Boolean = true) {
       val preferences = getSharedPreferences(VideoWallpaperModule.PREFERENCES_NAME, Context.MODE_PRIVATE)
       val uri = preferences.getString(VideoWallpaperModule.KEY_VIDEO_URI, null) ?: return
       val scaleMode = preferences.getString(VideoWallpaperModule.KEY_SCALE_MODE, "cover") ?: "cover"
@@ -69,14 +72,28 @@ class VideoWallpaperService : WallpaperService() {
       surfaceWidth = width
       surfaceHeight = height
       val aspectRatio = width.toFloat() / height.toFloat()
-      val effects = createEffects(scaleMode, aspectRatio, zoom, offsetX, offsetY)
+      val effects = if (allowEffects) createEffects(scaleMode, aspectRatio, zoom, offsetX, offsetY) else emptyList()
 
       player = ExoPlayer.Builder(applicationContext).build().also { exoPlayer ->
         exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
         exoPlayer.repeatMode = Player.REPEAT_MODE_ONE
         exoPlayer.volume = 0f
-        exoPlayer.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
-        exoPlayer.setVideoEffects(effects)
+        exoPlayer.videoScalingMode = if (scaleMode == "contain") {
+          C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+        } else {
+          C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+        }
+        if (effects.isNotEmpty()) {
+          exoPlayer.setVideoEffects(effects)
+          exoPlayer.addListener(object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+              if (!holder.surface.isValid) return
+              Handler(Looper.getMainLooper()).post {
+                if (holder.surface.isValid) startPlayer(holder, width, height, false)
+              }
+            }
+          })
+        }
         exoPlayer.setVideoSurface(holder.surface)
         exoPlayer.prepare()
         exoPlayer.playWhenReady = visible
@@ -90,8 +107,8 @@ class VideoWallpaperService : WallpaperService() {
       offsetX: Float,
       offsetY: Float
     ): List<Effect> {
+      if (scaleMode == "cover" || scaleMode == "contain") return emptyList()
       val layout = when (scaleMode) {
-        "contain" -> Presentation.LAYOUT_SCALE_TO_FIT
         "stretch" -> Presentation.LAYOUT_STRETCH_TO_FIT
         else -> Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
       }
