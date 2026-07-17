@@ -23,7 +23,7 @@ import * as Crypto from 'expo-crypto';
 import { File } from 'expo-file-system';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
-import { useVideoPlayer, VideoView, type VideoContentFit } from 'expo-video';
+import { useVideoPlayer, VideoView, type VideoContentFit, type VideoPlayer } from 'expo-video';
 import { WebView } from 'react-native-webview';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import VideoWallpaper from './modules/video-wallpaper/src/VideoWallpaperModule';
@@ -74,6 +74,7 @@ const colors = {
   primary: '#7356E8',
   primaryDark: '#4B2E94',
   purpleSoft: '#EEE8FF',
+  libraryBackground: '#F1ECFA',
   green: '#159B65',
   greenSoft: '#E4F7EE',
   red: '#D94C58',
@@ -253,16 +254,10 @@ function DownloadScreen({
 
   return (
     <View style={styles.flex}>
-      <PageHeader title="远程下载" subtitle="让你的电脑服务器代为下载 Steam 视频壁纸" />
+      <PageHeader title="远程下载" />
       <ScrollView contentContainerStyle={styles.pageContent} keyboardShouldPersistTaps="handled">
-        <View style={styles.noticeSuccess}>
-          <View style={styles.noticeDot} />
-          <Text style={styles.noticeSuccessText}>手机不需要安装 Steam 或 SteamCMD。</Text>
-        </View>
-
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>浏览 Steam 视频壁纸</Text>
-          <Text style={styles.sectionCaption}>在 App 内浏览热门视频壁纸，点进壁纸详情时会询问是否下载。</Text>
           <Pressable
             disabled={busy}
             onPress={() => setBrowserVisible(true)}
@@ -274,7 +269,6 @@ function DownloadScreen({
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>粘贴链接或 Workshop ID</Text>
-          <Text style={styles.sectionCaption}>支持详情页链接，也可以直接输入 Workshop ID。</Text>
           <TextInput
             autoCapitalize="none"
             autoCorrect={false}
@@ -304,10 +298,6 @@ function DownloadScreen({
           <Text style={[styles.sectionCaption, styles.statusMessage]}>{status}</Text>
         </View>
 
-        <View style={styles.cardMuted}>
-          <Text style={styles.tipTitle}>下载流程</Text>
-          <Text style={styles.tipText}>服务器从创意工坊下载并找到视频文件 → 手机接收 MP4 和预览图 → 自动加入本地壁纸库。</Text>
-        </View>
       </ScrollView>
       <Modal animationType="slide" onRequestClose={() => setBrowserVisible(false)} visible={browserVisible}>
         <SafeAreaView edges={['top', 'bottom']} style={styles.browserSafeArea}>
@@ -410,8 +400,8 @@ function LibraryScreen({
   onDelete: (item: WallpaperItem) => void;
 }) {
   return (
-    <View style={styles.flex}>
-      <PageHeader title="壁纸库" subtitle="浏览壁纸；点按后进入单独的启用设置页" />
+    <View style={styles.libraryScreen}>
+      <PageHeader title="壁纸库" />
       <View style={styles.libraryToolbar}>
         <View>
           <Text style={styles.libraryCount}>{items.length} 张壁纸</Text>
@@ -432,6 +422,7 @@ function LibraryScreen({
         renderItem={({ item }) => (
           <WallpaperCard item={item} onLongPress={() => onDelete(item)} onPress={() => onSelect(item)} />
         )}
+        style={styles.libraryListView}
       />
     </View>
   );
@@ -590,10 +581,6 @@ function SettingsScreen({
             </View>
           </View>
 
-          <View style={styles.cardMuted}>
-            <Text style={styles.tipTitle}>与电脑版共用服务器</Text>
-            <Text style={styles.tipText}>App 会调用 /api/status、/api/jobs、/api/files 和 /api/previews，并在每次请求中发送 X-Shabi-Key。</Text>
-          </View>
           <View style={styles.securityCard}>
             <Text style={styles.securityTitle}>密钥安全</Text>
             <Text style={styles.securityText}>访问密钥不会写进壁纸库或源码。若密钥曾出现在公开截图里，请在服务器上更换后再填入这里。</Text>
@@ -674,7 +661,7 @@ function ValueSlider({
 }
 
 function WallpaperPreview({
-  uri,
+  player,
   scaleMode,
   zoom,
   offsetX,
@@ -682,7 +669,7 @@ function WallpaperPreview({
   editor = false,
   containerStyle,
 }: {
-  uri: string;
+  player: VideoPlayer;
   scaleMode: ScaleMode;
   zoom: number;
   offsetX: number;
@@ -690,11 +677,6 @@ function WallpaperPreview({
   editor?: boolean;
   containerStyle?: StyleProp<ViewStyle>;
 }) {
-  const player = useVideoPlayer(uri, (instance) => {
-    instance.loop = true;
-    instance.muted = true;
-    instance.play();
-  });
   const contentFit: VideoContentFit = scaleMode === 'contain' ? 'contain' : scaleMode === 'stretch' ? 'fill' : 'cover';
   return (
     <View style={[styles.phonePreview, editor && styles.editorPhonePreview, containerStyle]}>
@@ -723,8 +705,7 @@ function WallpaperPreview({
 }
 
 function CustomWallpaperEditor({
-  visible,
-  uri,
+  player,
   zoom,
   offsetX,
   offsetY,
@@ -733,8 +714,7 @@ function CustomWallpaperEditor({
   onOffsetYChange,
   onClose,
 }: {
-  visible: boolean;
-  uri: string;
+  player: VideoPlayer;
   zoom: number;
   offsetX: number;
   offsetY: number;
@@ -744,17 +724,21 @@ function CustomWallpaperEditor({
   onClose: () => void;
 }) {
   const dragStart = useRef({ x: 0, y: 0 });
+  const offsetRef = useRef({ x: offsetX, y: offsetY });
+  useEffect(() => {
+    offsetRef.current = { x: offsetX, y: offsetY };
+  }, [offsetX, offsetY]);
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: () => {
-      dragStart.current = { x: offsetX, y: offsetY };
+      dragStart.current = offsetRef.current;
     },
     onPanResponderMove: (_, gesture) => {
       onOffsetXChange(Math.max(-1, Math.min(1, dragStart.current.x + gesture.dx / 150)));
       onOffsetYChange(Math.max(-1, Math.min(1, dragStart.current.y + gesture.dy / 260)));
     },
-  }), [offsetX, offsetY, onOffsetXChange, onOffsetYChange]);
+  }), [onOffsetXChange, onOffsetYChange]);
 
   const reset = () => {
     onZoomChange(1.15);
@@ -763,8 +747,7 @@ function CustomWallpaperEditor({
   };
 
   return (
-    <Modal animationType="slide" onRequestClose={onClose} visible={visible}>
-      <SafeAreaView edges={['top', 'bottom']} style={styles.customEditorSafeArea}>
+      <View style={styles.customEditorSafeArea}>
         <View style={styles.customEditorHeader}>
           <Pressable onPress={onClose} style={styles.editorHeaderButton}>
             <Text style={styles.editorHeaderButtonText}>取消</Text>
@@ -785,8 +768,8 @@ function CustomWallpaperEditor({
               editor
               offsetX={offsetX}
               offsetY={offsetY}
+              player={player}
               scaleMode="custom"
-              uri={uri}
               zoom={zoom}
             />
             <View {...panResponder.panHandlers} style={styles.customEditorGestureLayer}>
@@ -812,8 +795,7 @@ function CustomWallpaperEditor({
             </Pressable>
           </View>
         </View>
-      </SafeAreaView>
-    </Modal>
+      </View>
   );
 }
 
@@ -838,6 +820,11 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
   const [offsetY, setOffsetY] = useState(0);
   const [busy, setBusy] = useState(false);
   const [customEditorVisible, setCustomEditorVisible] = useState(false);
+  const player = useVideoPlayer(item.videoUri, (instance) => {
+    instance.loop = true;
+    instance.muted = true;
+    instance.play();
+  });
 
   const openSystemPreview = async () => {
     setBusy(true);
@@ -873,6 +860,21 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
     );
   };
 
+  if (customEditorVisible) {
+    return (
+      <CustomWallpaperEditor
+        offsetX={offsetX}
+        offsetY={offsetY}
+        onClose={() => setCustomEditorVisible(false)}
+        onOffsetXChange={setOffsetX}
+        onOffsetYChange={setOffsetY}
+        onZoomChange={setZoom}
+        player={player}
+        zoom={zoom}
+      />
+    );
+  }
+
   return (
     <View style={styles.flex}>
       <PageHeader title="启用壁纸" subtitle={item.title} onBack={onBack} />
@@ -880,8 +882,8 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
         <WallpaperPreview
           offsetX={offsetX}
           offsetY={offsetY}
+          player={player}
           scaleMode={scaleMode}
-          uri={item.videoUri}
           zoom={zoom}
         />
 
@@ -940,17 +942,6 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
         </Pressable>
         <Text style={styles.systemNote}>动态壁纸默认静音，并会在桌面不可见时暂停播放以节省电量。</Text>
       </ScrollView>
-      <CustomWallpaperEditor
-        offsetX={offsetX}
-        offsetY={offsetY}
-        onClose={() => setCustomEditorVisible(false)}
-        onOffsetXChange={setOffsetX}
-        onOffsetYChange={setOffsetY}
-        onZoomChange={setZoom}
-        uri={item.videoUri}
-        visible={customEditorVisible}
-        zoom={zoom}
-      />
     </View>
   );
 }
@@ -1134,12 +1125,14 @@ const styles = StyleSheet.create({
   statusMessage: { marginTop: 10 },
   tipTitle: { color: colors.primaryDark, fontSize: 14, fontWeight: '800' },
   tipText: { color: colors.muted, fontSize: 12, lineHeight: 19, marginTop: 5 },
-  libraryToolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 15, paddingBottom: 11, backgroundColor: colors.background },
+  libraryScreen: { flex: 1, backgroundColor: colors.libraryBackground },
+  libraryToolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 15, paddingBottom: 11, backgroundColor: colors.libraryBackground },
   libraryCount: { color: colors.text, fontSize: 16, fontWeight: '800' },
   toolbarCaption: { color: colors.muted, fontSize: 11, marginTop: 2 },
   smallPrimaryButton: { height: 38, borderRadius: 12, backgroundColor: colors.primary, justifyContent: 'center', paddingHorizontal: 13 },
   smallPrimaryButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
-  libraryList: { paddingHorizontal: 12, paddingBottom: 30, backgroundColor: colors.background },
+  libraryListView: { flex: 1, backgroundColor: colors.libraryBackground },
+  libraryList: { flexGrow: 1, paddingHorizontal: 12, paddingBottom: 30, backgroundColor: colors.libraryBackground },
   libraryListEmpty: { flexGrow: 1 },
   libraryRow: { gap: 10 },
   wallpaperCard: { width: '48.5%', minWidth: 0, backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: 15, padding: 7, marginBottom: 10 },
