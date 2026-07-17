@@ -188,8 +188,18 @@ class VideoWallpaperModule : Module() {
   @Suppress("DEPRECATION")
   private fun isXiaomiLockScreenDisplayAllowed(): Boolean = try {
     val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-    appOps.checkOpNoThrow(MIUI_OP_SHOW_WHEN_LOCKED, Process.myUid(), context.packageName) ==
-      AppOpsManager.MODE_ALLOWED
+    val checkOpNoThrow = appOps.javaClass.getMethod(
+      "checkOpNoThrow",
+      Int::class.javaPrimitiveType,
+      Int::class.javaPrimitiveType,
+      String::class.java
+    )
+    (checkOpNoThrow.invoke(
+      appOps,
+      MIUI_OP_SHOW_WHEN_LOCKED,
+      Process.myUid(),
+      context.packageName
+    ) as? Int) == AppOpsManager.MODE_ALLOWED
   } catch (_: Exception) {
     false
   }
