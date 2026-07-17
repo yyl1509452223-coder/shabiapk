@@ -1,6 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import type { ServerSettings, WallpaperItem } from './types';
+import { DEFAULT_ACCESS_KEY, DEFAULT_SERVER_URL } from './defaultConfig';
 
 const SERVER_URL_KEY = 'shabi-server-url';
 const ACCESS_KEY_KEY = 'shabi-access-key';
@@ -20,7 +21,12 @@ export async function loadServerSettings(): Promise<ServerSettings> {
     SecureStore.getItemAsync(SERVER_URL_KEY),
     SecureStore.getItemAsync(ACCESS_KEY_KEY),
   ]);
-  return { serverUrl: serverUrl ?? '', accessKey: accessKey ?? '' };
+  const settings = {
+    serverUrl: serverUrl?.trim() || DEFAULT_SERVER_URL,
+    accessKey: accessKey?.trim() || DEFAULT_ACCESS_KEY,
+  };
+  if (!serverUrl?.trim() || !accessKey?.trim()) await saveServerSettings(settings);
+  return settings;
 }
 
 export async function saveServerSettings(settings: ServerSettings) {

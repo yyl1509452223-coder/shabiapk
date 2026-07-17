@@ -1,9 +1,10 @@
 {
   "name": "shabi-android",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": "index.ts",
   "dependencies": {
     "expo": "~57.0.6",
+    "expo-crypto": "~57.0.1",
     "expo-file-system": "~57.0.1",
     "expo-linear-gradient": "~57.0.1",
     "expo-secure-store": "~57.0.1",
@@ -11,7 +12,8 @@
     "expo-system-ui": "~57.0.1",
     "expo-video": "~57.0.1",
     "react": "19.2.3",
-    "react-native": "0.86.0"
+    "react-native": "0.86.0",
+    "react-native-webview": "13.16.1"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import expo.modules.kotlin.exception.Exceptions
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
@@ -51,26 +52,28 @@ class VideoWallpaperModule : Module() {
         .apply()
 
       val component = ComponentName(context, VideoWallpaperService::class.java)
-      val previewIntent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
+      val directPreviewIntent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
         putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, component)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       }
+      val chooserIntent = Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER)
+      val activity = appContext.throwingActivity
+      val packageManager = activity.packageManager
 
-      try {
-        context.startActivity(previewIntent)
-      } catch (_: ActivityNotFoundException) {
-        val chooserIntent = Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER).apply {
-          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(chooserIntent)
+      // Some Android skins silently ignore the direct component preview. Opening the
+      // system live-wallpaper chooser from the foreground activity is more reliable.
+      val launchIntent = when {
+        chooserIntent.resolveActivity(packageManager) != null -> chooserIntent
+        directPreviewIntent.resolveActivity(packageManager) != null -> directPreviewIntent
+        else -> throw ActivityNotFoundException("系统没有可用的动态壁纸选择器")
       }
+      activity.startActivity(launchIntent)
 
       mapOf(
         "opened" to true,
         "requestedTarget" to safeTarget,
         "directTargetSelection" to false
       )
-    }
+    }.runOnQueue(Queues.MAIN)
   }
 
   companion object {

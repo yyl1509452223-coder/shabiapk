@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -6,6 +6,7 @@ import {
   GestureResponderEvent,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -16,10 +17,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import * as Crypto from 'expo-crypto';
 import { File } from 'expo-file-system';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoView, type VideoContentFit } from 'expo-video';
+import { WebView } from 'react-native-webview';
 import VideoWallpaper from './modules/video-wallpaper/src/VideoWallpaperModule';
 import {
   apiHeaders,
@@ -48,6 +51,7 @@ import type {
   WallpaperOptions,
   WallpaperTarget,
 } from './src/types';
+import { ADMIN_PASSWORD_HASH } from './src/defaultConfig';
 
 type Tab = 'download' | 'library' | 'settings';
 
@@ -69,6 +73,7 @@ const colors = {
 };
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const STEAM_VIDEO_WORKSHOP_URL = 'https://steamcommunity.com/workshop/browse/?appid=431960&browsesort=trend&section=readytouseitems&p=1&num_per_page=30&days=7&requiredtags%5B%5D=Everyone&requiredtags%5B%5D=Video';
 
 function messageOf(error: unknown) {
   return error instanceof Error ? error.message : '操作失败，请稍后重试。';
@@ -123,8 +128,10 @@ function DownloadScreen({
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('粘贴 Steam 创意工坊链接或输入 Workshop ID。');
+  const [browserVisible, setBrowserVisible] = useState(false);
+  const workshopPromptOpen = useRef(false);
 
-  const download = async () => {
+  const download = async (requestedInput?: string) => {
     if (!settings.serverUrl || !settings.accessKey) {
       Alert.alert('先连接服务器', '请先保存下载服务器地址和访问密钥。', [
         { text: '取消', style: 'cancel' },
@@ -132,7 +139,8 @@ function DownloadScreen({
       ]);
       return;
     }
-    const workshopId = extractWorkshopId(input);
+    const source = requestedInput?.trim() || input;
+    const workshopId = extractWorkshopId(source);
     if (!workshopId) {
       Alert.alert('链接不正确', '请输入有效的创意工坊详情页链接或 6–20 位 Workshop ID。');
       return;
@@ -203,6 +211,30 @@ function DownloadScreen({
     }
   };
 
+  const confirmWorkshopDownload = (url: string) => {
+    const workshopId = extractWorkshopId(url);
+    if (!workshopId || workshopPromptOpen.current) return;
+    workshopPromptOpen.current = true;
+    const resetPrompt = () => { workshopPromptOpen.current = false; };
+    Alert.alert(
+      '下载这张视频壁纸？',
+      `Workshop ID：${workshopId}\n确认后将交给你的服务器下载。`,
+      [
+        { text: '继续浏览', style: 'cancel', onPress: resetPrompt },
+        {
+          text: '立即下载',
+          onPress: () => {
+            resetPrompt();
+            setBrowserVisible(false);
+            setInput(url);
+            setTimeout(() => void download(url), 250);
+          },
+        },
+      ],
+      { cancelable: true, onDismiss: resetPrompt },
+    );
+  };
+
   return (
     <View style={styles.flex}>
       <PageHeader title="远程下载" subtitle="让你的电脑服务器代为下载 Steam 视频壁纸" />
@@ -213,7 +245,19 @@ function DownloadScreen({
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>创意工坊壁纸</Text>
+          <Text style={styles.sectionTitle}>浏览 Steam 视频壁纸</Text>
+          <Text style={styles.sectionCaption}>在 App 内浏览热门视频壁纸，点进壁纸详情时会询问是否下载。</Text>
+          <Pressable
+            disabled={busy}
+            onPress={() => setBrowserVisible(true)}
+            style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed, busy && styles.disabled]}
+          >
+            <Text style={styles.primaryButtonText}>打开创意工坊浏览</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>粘贴链接或 Workshop ID</Text>
           <Text style={styles.sectionCaption}>支持详情页链接，也可以直接输入 Workshop ID。</Text>
           <TextInput
             autoCapitalize="none"
@@ -249,6 +293,40 @@ function DownloadScreen({
           <Text style={styles.tipText}>服务器从创意工坊下载并找到视频文件 → 手机接收 MP4 和预览图 → 自动加入本地壁纸库。</Text>
         </View>
       </ScrollView>
+      <Modal animationType="slide" onRequestClose={() => setBrowserVisible(false)} visible={browserVisible}>
+        <SafeAreaView style={styles.browserSafeArea}>
+          <View style={styles.browserHeader}>
+            <View style={styles.flex}>
+              <Text style={styles.browserTitle}>Steam 视频壁纸</Text>
+              <Text style={styles.browserCaption}>点进壁纸后即可确认下载</Text>
+            </View>
+            <Pressable onPress={() => setBrowserVisible(false)} style={styles.browserCloseButton}>
+              <Text style={styles.browserCloseText}>关闭</Text>
+            </Pressable>
+          </View>
+          <WebView
+            domStorageEnabled
+            javaScriptEnabled
+            onShouldStartLoadWithRequest={(request) => {
+              if (!extractWorkshopId(request.url)) return true;
+              confirmWorkshopDownload(request.url);
+              return false;
+            }}
+            originWhitelist={['http://*', 'https://*']}
+            renderLoading={() => (
+              <View style={styles.browserLoading}>
+                <ActivityIndicator color={colors.primary} size="large" />
+                <Text style={styles.browserLoadingText}>正在打开 Steam 创意工坊…</Text>
+              </View>
+            )}
+            setSupportMultipleWindows={false}
+            source={{ uri: STEAM_VIDEO_WORKSHOP_URL }}
+            startInLoadingState
+            style={styles.browserWebView}
+            thirdPartyCookiesEnabled
+          />
+        </SafeAreaView>
+      </Modal>
     </View>
   );
 }
@@ -355,6 +433,9 @@ function SettingsScreen({
   const [showKey, setShowKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [unlocked, setUnlocked] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [unlocking, setUnlocking] = useState(false);
 
   useEffect(() => {
     setServerUrl(settings.serverUrl);
@@ -362,6 +443,22 @@ function SettingsScreen({
   }, [settings]);
 
   const draft = () => ({ serverUrl: normalizeServerUrl(serverUrl), accessKey: accessKey.trim() });
+
+  const unlock = async () => {
+    setUnlocking(true);
+    try {
+      const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, adminPassword);
+      if (digest !== ADMIN_PASSWORD_HASH) {
+        setAdminPassword('');
+        Alert.alert('密码错误', '管理员密码不正确。');
+        return;
+      }
+      setUnlocked(true);
+      setAdminPassword('');
+    } finally {
+      setUnlocking(false);
+    }
+  };
 
   const save = async () => {
     try {
@@ -392,6 +489,41 @@ function SettingsScreen({
       setBusy(false);
     }
   };
+
+  if (!unlocked) return (
+    <View style={styles.flex}>
+      <PageHeader title="服务器设置" subtitle="管理员验证后才可查看服务器配置" />
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
+        <ScrollView contentContainerStyle={styles.lockedPageContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.lockIcon}><Text style={styles.lockIconText}>🔒</Text></View>
+          <Text style={styles.lockTitle}>服务器配置已隐藏</Text>
+          <Text style={styles.lockCaption}>请输入管理员密码后查看或修改服务器地址和访问密钥。</Text>
+          <View style={styles.lockCard}>
+            <Text style={styles.fieldLabel}>管理员密码</Text>
+            <TextInput
+              autoFocus
+              keyboardType="number-pad"
+              maxLength={6}
+              onChangeText={setAdminPassword}
+              onSubmitEditing={() => void unlock()}
+              placeholder="请输入 6 位密码"
+              placeholderTextColor="#A39BAF"
+              secureTextEntry
+              style={styles.input}
+              value={adminPassword}
+            />
+            <Pressable
+              disabled={unlocking || adminPassword.length !== 6}
+              onPress={() => void unlock()}
+              style={[styles.primaryButton, (unlocking || adminPassword.length !== 6) && styles.disabled]}
+            >
+              {unlocking ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>验证并查看设置</Text>}
+            </Pressable>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
+  );
 
   return (
     <View style={styles.flex}>
@@ -891,6 +1023,12 @@ const styles = StyleSheet.create({
   securityCard: { backgroundColor: colors.redSoft, borderRadius: 16, padding: 16 },
   securityTitle: { color: '#9B2732', fontSize: 14, fontWeight: '800' },
   securityText: { color: '#8F4850', fontSize: 12, lineHeight: 19, marginTop: 5 },
+  lockedPageContent: { flexGrow: 1, padding: 24, paddingBottom: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
+  lockIcon: { width: 72, height: 72, borderRadius: 24, backgroundColor: colors.purpleSoft, alignItems: 'center', justifyContent: 'center' },
+  lockIconText: { fontSize: 30 },
+  lockTitle: { color: colors.text, fontSize: 20, fontWeight: '900', marginTop: 18 },
+  lockCaption: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 7, maxWidth: 320 },
+  lockCard: { width: '100%', maxWidth: 420, backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: 18, padding: 16, marginTop: 22 },
   choiceGrid: { gap: 9, marginTop: 13 },
   choiceButton: { minHeight: 62, borderWidth: 1.5, borderColor: colors.line, backgroundColor: '#FCFBFE', borderRadius: 14, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 11 },
   choiceButtonActive: { borderColor: colors.primary, backgroundColor: colors.purpleSoft },
@@ -918,6 +1056,15 @@ const styles = StyleSheet.create({
   applyButton: { minHeight: 56, backgroundColor: colors.primary, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   applyButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
   systemNote: { color: colors.muted, fontSize: 11, lineHeight: 17, textAlign: 'center', paddingHorizontal: 18 },
+  browserSafeArea: { flex: 1, backgroundColor: colors.primaryDark },
+  browserHeader: { minHeight: 64, paddingHorizontal: 16, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.primaryDark },
+  browserTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '900' },
+  browserCaption: { color: '#DDD4FA', fontSize: 11, marginTop: 2 },
+  browserCloseButton: { minWidth: 60, height: 38, borderRadius: 12, backgroundColor: '#FFFFFF22', alignItems: 'center', justifyContent: 'center' },
+  browserCloseText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  browserWebView: { flex: 1, backgroundColor: '#FFFFFF' },
+  browserLoading: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', gap: 12 },
+  browserLoadingText: { color: colors.muted, fontSize: 13 },
   bottomNavigation: { height: 68, flexDirection: 'row', backgroundColor: colors.panel, borderTopWidth: 1, borderTopColor: colors.line, paddingBottom: 4 },
   navButton: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   navGlyph: { color: '#988FA6', fontSize: 21, fontWeight: '800', lineHeight: 24 },
