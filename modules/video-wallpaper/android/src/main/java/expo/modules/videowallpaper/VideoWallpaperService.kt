@@ -26,6 +26,12 @@ class VideoWallpaperService : WallpaperService() {
     private var visible = false
     private var surfaceWidth = 0
     private var surfaceHeight = 0
+    private var playbackGeneration = 0
+    private var firstFrameRendered = false
+    private var recoveryRunnable: Runnable? = null
+    private var currentHolder: SurfaceHolder? = null
+    private var currentEffectsEnabled = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onSurfaceCreated(holder: SurfaceHolder) {
       super.onSurfaceCreated(holder)
@@ -46,8 +52,18 @@ class VideoWallpaperService : WallpaperService() {
 
     override fun onVisibilityChanged(isVisible: Boolean) {
       visible = isVisible
-      player?.playWhenReady = isVisible
-      if (!isVisible) player?.pause()
+      val shouldPlay = isVisible || isPreview
+      player?.playWhenReady = shouldPlay
+      if (shouldPlay) {
+        player?.play()
+        val holder = currentHolder
+        if (!firstFrameRendered && currentEffectsEnabled && holder?.surface?.isValid == true) {
+          scheduleRecovery(holder, surfaceWidth, surfaceHeight, playbackGeneration)
+        }
+      } else {
+        cancelRecovery()
+        player?.pause()
+      }
     }
 
     override fun onSurfaceDestroyed(holder: SurfaceHolder) {
@@ -69,10 +85,15 @@ class VideoWallpaperService : WallpaperService() {
       val offsetY = preferences.getFloat(VideoWallpaperModule.KEY_OFFSET_Y, 0f).coerceIn(-1f, 1f)
 
       releasePlayer()
+      playbackGeneration += 1
       surfaceWidth = width
       surfaceHeight = height
       val aspectRatio = width.toFloat() / height.toFloat()
       val effects = if (allowEffects) createEffects(scaleMode, aspectRatio, zoom, offsetX, offsetY) else emptyList()
+      val generation = playbackGeneration
+      firstFrameRendered = false
+      currentHolder = holder
+      currentEffectsEnabled = allowEffects
 
       player = ExoPlayer.Builder(applicationContext).build().also { exoPlayer ->
         exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
@@ -83,21 +104,32 @@ class VideoWallpaperService : WallpaperService() {
         } else {
           C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
         }
-        if (effects.isNotEmpty()) {
-          exoPlayer.setVideoEffects(effects)
-          exoPlayer.addListener(object : Player.Listener {
-            override fun onPlayerError(error: PlaybackException) {
-              if (!holder.surface.isValid) return
-              Handler(Looper.getMainLooper()).post {
-                if (holder.surface.isValid) startPlayer(holder, width, height, false)
+        if (effects.isNotEmpty()) exoPlayer.setVideoEffects(effects)
+        exoPlayer.addListener(object : Player.Listener {
+          override fun onRenderedFirstFrame() {
+            if (generation != playbackGeneration) return
+            firstFrameRendered = true
+            cancelRecovery()
+          }
+
+          override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_READY && (visible || isPreview)) exoPlayer.play()
+          }
+
+          override fun onPlayerError(error: PlaybackException) {
+            if (!allowEffects || generation != playbackGeneration || !holder.surface.isValid) return
+            mainHandler.post {
+              if (generation == playbackGeneration && holder.surface.isValid) {
+                startPlayer(holder, width, height, false)
               }
             }
-          })
-        }
+          }
+        })
         exoPlayer.setVideoSurface(holder.surface)
         exoPlayer.prepare()
-        exoPlayer.playWhenReady = visible
+        exoPlayer.playWhenReady = visible || isPreview
       }
+      if (allowEffects && (visible || isPreview)) scheduleRecovery(holder, width, height, generation)
     }
 
     private fun createEffects(
@@ -125,9 +157,30 @@ class VideoWallpaperService : WallpaperService() {
     }
 
     private fun releasePlayer() {
+      cancelRecovery()
       player?.clearVideoSurface()
       player?.release()
       player = null
+      currentHolder = null
+      currentEffectsEnabled = false
     }
+
+    private fun scheduleRecovery(holder: SurfaceHolder, width: Int, height: Int, generation: Int) {
+      cancelRecovery()
+      recoveryRunnable = Runnable {
+        if (!firstFrameRendered && generation == playbackGeneration && holder.surface.isValid) {
+          startPlayer(holder, width, height, false)
+        }
+      }.also { mainHandler.postDelayed(it, FIRST_FRAME_TIMEOUT_MS) }
+    }
+
+    private fun cancelRecovery() {
+      recoveryRunnable?.let(mainHandler::removeCallbacks)
+      recoveryRunnable = null
+    }
+  }
+
+  companion object {
+    private const val FIRST_FRAME_TIMEOUT_MS = 2500L
   }
 }
