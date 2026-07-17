@@ -14,6 +14,9 @@ export type WallpaperReadiness = {
   lockScreenDisplayRequired: boolean;
   lockScreenDisplayAllowed: boolean;
   overlayAllowed: boolean;
+  wallpaperServicePermissionRequired: boolean;
+  wallpaperServicePermissionAllowed: boolean;
+  wallpaperComponentReady: boolean;
   wallpaperServiceReady: boolean;
   allRequiredReady: boolean;
 };

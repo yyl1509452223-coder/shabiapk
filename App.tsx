@@ -984,6 +984,7 @@ function StartupPermissionModal({
   const lockScreenOk = readiness?.lockScreenDisplayAllowed === true;
   const overlayOk = readiness?.overlayAllowed === true;
   const wallpaperOk = readiness?.wallpaperServiceReady === true;
+  const wallpaperPermissionRequired = readiness?.wallpaperServicePermissionRequired === true;
   const deviceName = [readiness?.manufacturer, readiness?.model].filter(Boolean).join(' ');
 
   return (
@@ -1022,7 +1023,9 @@ function StartupPermissionModal({
               label="动态壁纸服务"
               ok={wallpaperOk}
               onAction={!wallpaperOk ? () => onOpenSetting('wallpaper') : undefined}
-              status={wallpaperOk ? '服务正常' : '系统限制或服务未启用'}
+              status={!wallpaperPermissionRequired && wallpaperOk
+                ? '此机型不需要单独开启'
+                : wallpaperOk ? '已开启' : '未开启或被系统限制'}
             />
           </View>
 

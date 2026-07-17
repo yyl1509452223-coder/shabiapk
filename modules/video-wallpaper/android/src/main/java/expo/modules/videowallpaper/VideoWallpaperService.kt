@@ -40,26 +40,24 @@ class VideoWallpaperService : WallpaperService() {
       val frame = holder.surfaceFrame
       val width = frame.width().takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
       val height = frame.height().takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
-      drawCachedFirstFrame(holder, width, height)
-      startPlayer(
-        holder,
-        width,
-        height
-      )
+      startPlayer(holder, width, height)
     }
 
     override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
       super.onSurfaceChanged(holder, format, width, height)
       if (width > 0 && height > 0 && (width != surfaceWidth || height != surfaceHeight)) {
-        drawCachedFirstFrame(holder, width, height)
         startPlayer(holder, width, height)
       }
     }
 
     override fun onSurfaceRedrawNeeded(holder: SurfaceHolder) {
       super.onSurfaceRedrawNeeded(holder)
-      if (!firstFrameRendered) {
-        drawCachedFirstFrame(holder, surfaceWidth, surfaceHeight)
+      if (player == null && holder.surface.isValid) {
+        startPlayer(
+          holder,
+          surfaceWidth.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels,
+          surfaceHeight.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        )
       }
     }
 
@@ -108,6 +106,11 @@ class VideoWallpaperService : WallpaperService() {
       currentHolder = holder
       currentEffectsEnabled = effects.isNotEmpty()
 
+      // Draw the cached frame only before MediaCodec becomes the Surface producer.
+      // Locking the Canvas again after setVideoSurface() can disconnect the decoder on
+      // some Xiaomi/HyperOS devices, leaving the preview and applied wallpaper static.
+      drawCachedFirstFrame(holder, width, height)
+
       player = ExoPlayer.Builder(applicationContext).build().also { exoPlayer ->
         exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
         exoPlayer.repeatMode = Player.REPEAT_MODE_ONE
@@ -139,7 +142,6 @@ class VideoWallpaperService : WallpaperService() {
           }
         })
         exoPlayer.setVideoSurface(holder.surface)
-        drawCachedFirstFrame(holder, width, height)
         exoPlayer.prepare()
         exoPlayer.playWhenReady = visible || isPreview
       }

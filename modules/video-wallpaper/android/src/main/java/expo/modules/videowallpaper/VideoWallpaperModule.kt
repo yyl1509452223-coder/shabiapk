@@ -36,18 +36,24 @@ class VideoWallpaperModule : Module() {
 
     Function("getReadiness") {
       val manager = WallpaperManager.getInstance(context)
-      val lockScreenRequired = isXiaomiFamily()
-      val lockScreenAllowed = !lockScreenRequired || isXiaomiLockScreenDisplayAllowed()
+      val lockScreenPermission = readMiuiAppOp(MIUI_OP_SHOW_WHEN_LOCKED)
+      val liveWallpaperPermission = readMiuiAppOp(MIUI_OP_LIVE_WALLPAPER_SERVICE)
+      val lockScreenRequired = lockScreenPermission.required
+      val lockScreenAllowed = lockScreenPermission.allowed
       val overlayAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(context)
-      val wallpaperServiceReady = manager.isWallpaperSupported &&
+      val wallpaperComponentReady = manager.isWallpaperSupported &&
         manager.isSetWallpaperAllowed &&
         isWallpaperServiceEnabled()
+      val wallpaperServiceReady = wallpaperComponentReady && liveWallpaperPermission.allowed
       mapOf(
         "manufacturer" to Build.MANUFACTURER.orEmpty(),
         "model" to Build.MODEL.orEmpty(),
         "lockScreenDisplayRequired" to lockScreenRequired,
         "lockScreenDisplayAllowed" to lockScreenAllowed,
         "overlayAllowed" to overlayAllowed,
+        "wallpaperServicePermissionRequired" to liveWallpaperPermission.required,
+        "wallpaperServicePermissionAllowed" to liveWallpaperPermission.allowed,
+        "wallpaperComponentReady" to wallpaperComponentReady,
         "wallpaperServiceReady" to wallpaperServiceReady,
         "allRequiredReady" to (lockScreenAllowed && overlayAllowed && wallpaperServiceReady)
       )
@@ -185,23 +191,34 @@ class VideoWallpaperModule : Module() {
     return vendor.contains("xiaomi") || vendor.contains("redmi") || vendor.contains("poco")
   }
 
+  private data class MiuiAppOpState(val required: Boolean, val allowed: Boolean)
+
   @Suppress("DEPRECATION")
-  private fun isXiaomiLockScreenDisplayAllowed(): Boolean = try {
-    val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-    val checkOpNoThrow = appOps.javaClass.getMethod(
-      "checkOpNoThrow",
-      Int::class.javaPrimitiveType,
-      Int::class.javaPrimitiveType,
-      String::class.java
-    )
-    (checkOpNoThrow.invoke(
-      appOps,
-      MIUI_OP_SHOW_WHEN_LOCKED,
-      Process.myUid(),
-      context.packageName
-    ) as? Int) == AppOpsManager.MODE_ALLOWED
-  } catch (_: Exception) {
-    false
+  private fun readMiuiAppOp(operation: Int): MiuiAppOpState {
+    if (!isXiaomiFamily()) return MiuiAppOpState(required = false, allowed = true)
+    return try {
+      val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+      val checkOpNoThrow = appOps.javaClass.getMethod(
+        "checkOpNoThrow",
+        Int::class.javaPrimitiveType,
+        Int::class.javaPrimitiveType,
+        String::class.java
+      )
+      val mode = checkOpNoThrow.invoke(
+        appOps,
+        operation,
+        Process.myUid(),
+        context.packageName
+      ) as? Int
+      if (mode == null || mode == AppOpsManager.MODE_ERRORED) {
+        MiuiAppOpState(required = false, allowed = true)
+      } else {
+        MiuiAppOpState(required = true, allowed = mode == AppOpsManager.MODE_ALLOWED)
+      }
+    } catch (_: Exception) {
+      // Older MIUI versions do not define every newer vendor operation.
+      MiuiAppOpState(required = false, allowed = true)
+    }
   }
 
   @Suppress("DEPRECATION")
@@ -292,6 +309,7 @@ class VideoWallpaperModule : Module() {
     private const val PREVIEW_FRAME_FILE = "video_wallpaper_first_frame.jpg"
     private const val PREVIEW_MAX_SIDE = 1440
     private const val MIUI_OP_SHOW_WHEN_LOCKED = 10020
+    private const val MIUI_OP_LIVE_WALLPAPER_SERVICE = 10045
     private val SCALE_MODES = setOf("cover", "contain", "stretch", "custom")
     private val TARGETS = setOf("home", "lock", "both")
   }
