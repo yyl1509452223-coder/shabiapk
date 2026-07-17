@@ -6,6 +6,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
@@ -23,6 +26,33 @@ class VideoWallpaperModule : Module() {
       val manager = WallpaperManager.getInstance(context)
       manager.isWallpaperSupported && manager.isSetWallpaperAllowed
     }
+
+    Function("getReadiness") {
+      val manager = WallpaperManager.getInstance(context)
+      val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+      mapOf(
+        "wallpaperSupported" to manager.isWallpaperSupported,
+        "setWallpaperAllowed" to manager.isSetWallpaperAllowed,
+        "batteryOptimizationIgnored" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+          powerManager.isIgnoringBatteryOptimizations(context.packageName)
+        } else {
+          true
+        }
+      )
+    }
+
+    AsyncFunction("openAppSettings") {
+      appContext.throwingActivity.startActivity(appDetailsIntent())
+    }.runOnQueue(Queues.MAIN)
+
+    AsyncFunction("openBatterySettings") {
+      val activity = appContext.throwingActivity
+      try {
+        activity.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+      } catch (_: ActivityNotFoundException) {
+        activity.startActivity(appDetailsIntent())
+      }
+    }.runOnQueue(Queues.MAIN)
 
     AsyncFunction("setVideoWallpaper") {
         uri: String,
@@ -90,6 +120,10 @@ class VideoWallpaperModule : Module() {
         "directTargetSelection" to false
       )
     }.runOnQueue(Queues.MAIN)
+  }
+
+  private fun appDetailsIntent() = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+    data = Uri.fromParts("package", context.packageName, null)
   }
 
   companion object {
