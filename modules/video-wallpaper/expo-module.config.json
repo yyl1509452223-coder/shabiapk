@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["VideoWallpaperModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.videowallpaper.VideoWallpaperModule"]
+  }
+}

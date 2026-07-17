@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "鲨壁",
+    "slug": "shabi-android",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.colorfulshark.shabi"
+    },
+    "android": {
+      "package": "com.colorfulshark.shabi",
+      "adaptiveIcon": {
+        "backgroundColor": "#4B2E94",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": []
+    },
+    "plugins": [
+      "expo-video",
+      "expo-secure-store"
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
