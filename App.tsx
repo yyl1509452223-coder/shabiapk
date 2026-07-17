@@ -827,7 +827,6 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
       if (Platform.OS !== 'android' || !VideoWallpaper.isSupported()) {
         throw new Error('这台设备不支持 Android 动态壁纸。');
       }
-      await VideoWallpaper.prepareVideoWallpaper(item.videoUri, item.previewUri ?? null);
       const options: WallpaperOptions = { uri: item.videoUri, scaleMode, zoom, offsetX, offsetY, target: 'home' };
       await VideoWallpaper.setVideoWallpaper(
         options.uri,
@@ -843,12 +842,6 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
       setBusy(false);
     }
   };
-
-  useEffect(() => {
-    if (Platform.OS === 'android') {
-      void VideoWallpaper.prepareVideoWallpaper(item.videoUri, item.previewUri ?? null);
-    }
-  }, [item.previewUri, item.videoUri]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {

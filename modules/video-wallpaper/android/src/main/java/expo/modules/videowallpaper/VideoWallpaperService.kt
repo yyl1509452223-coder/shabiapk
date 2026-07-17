@@ -1,8 +1,6 @@
 package expo.modules.videowallpaper
 
 import android.content.Context
-import android.graphics.BitmapFactory
-import android.graphics.Color
 import android.graphics.Matrix
 import android.net.Uri
 import android.os.Handler
@@ -37,6 +35,7 @@ class VideoWallpaperService : WallpaperService() {
 
     override fun onSurfaceCreated(holder: SurfaceHolder) {
       super.onSurfaceCreated(holder)
+      visible = true
       val frame = holder.surfaceFrame
       val width = frame.width().takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
       val height = frame.height().takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
@@ -106,11 +105,6 @@ class VideoWallpaperService : WallpaperService() {
       currentHolder = holder
       currentEffectsEnabled = effects.isNotEmpty()
 
-      // Draw the cached frame only before MediaCodec becomes the Surface producer.
-      // Locking the Canvas again after setVideoSurface() can disconnect the decoder on
-      // some Xiaomi/HyperOS devices, leaving the preview and applied wallpaper static.
-      drawCachedFirstFrame(holder, width, height)
-
       player = ExoPlayer.Builder(applicationContext).build().also { exoPlayer ->
         exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
         exoPlayer.repeatMode = Player.REPEAT_MODE_ONE
@@ -141,61 +135,12 @@ class VideoWallpaperService : WallpaperService() {
             }
           }
         })
-        exoPlayer.setVideoSurface(holder.surface)
+        exoPlayer.setVideoSurfaceHolder(holder)
         exoPlayer.prepare()
-        exoPlayer.playWhenReady = visible || isPreview
+        exoPlayer.playWhenReady = true
+        exoPlayer.play()
       }
       if (effects.isNotEmpty() && (visible || isPreview)) scheduleRecovery(holder, width, height, generation)
-    }
-
-    private fun drawCachedFirstFrame(holder: SurfaceHolder, width: Int, height: Int) {
-      if (width <= 0 || height <= 0 || !holder.surface.isValid) return
-      val preferences = getSharedPreferences(VideoWallpaperModule.PREFERENCES_NAME, Context.MODE_PRIVATE)
-      val framePath = preferences.getString(VideoWallpaperModule.KEY_PREVIEW_FRAME_PATH, null) ?: return
-      val bitmap = BitmapFactory.decodeFile(framePath) ?: return
-      val scaleMode = preferences.getString(VideoWallpaperModule.KEY_SCALE_MODE, "cover") ?: "cover"
-      val zoom = preferences.getFloat(VideoWallpaperModule.KEY_ZOOM, 1f).coerceIn(1f, 3f)
-      val offsetX = preferences.getFloat(VideoWallpaperModule.KEY_OFFSET_X, 0f).coerceIn(-1f, 1f)
-      val offsetY = preferences.getFloat(VideoWallpaperModule.KEY_OFFSET_Y, 0f).coerceIn(-1f, 1f)
-      var canvas: android.graphics.Canvas? = null
-      try {
-        val lockedCanvas = holder.lockCanvas()
-        canvas = lockedCanvas
-        lockedCanvas.drawColor(Color.BLACK)
-        val matrix = Matrix()
-        if (scaleMode == "stretch") {
-          matrix.setScale(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
-        } else {
-          val widthScale = width.toFloat() / bitmap.width.toFloat()
-          val heightScale = height.toFloat() / bitmap.height.toFloat()
-          var scale = if (scaleMode == "contain") {
-            minOf(widthScale, heightScale)
-          } else {
-            maxOf(widthScale, heightScale)
-          }
-          if (scaleMode == "custom") scale *= zoom
-          val scaledWidth = bitmap.width * scale
-          val scaledHeight = bitmap.height * scale
-          val overflowX = (scaledWidth - width).coerceAtLeast(0f)
-          val overflowY = (scaledHeight - height).coerceAtLeast(0f)
-          val left = (width - scaledWidth) / 2f + offsetX * overflowX / 2f
-          val top = (height - scaledHeight) / 2f + offsetY * overflowY / 2f
-          matrix.setScale(scale, scale)
-          matrix.postTranslate(left, top)
-        }
-        lockedCanvas.drawBitmap(bitmap, matrix, null)
-      } catch (_: Exception) {
-        // The video decoder will still render even if a vendor surface rejects canvas drawing.
-      } finally {
-        if (canvas != null) {
-          try {
-            holder.unlockCanvasAndPost(canvas)
-          } catch (_: Exception) {
-            // Surface may have been replaced by the system preview while drawing.
-          }
-        }
-        bitmap.recycle()
-      }
     }
 
     private fun createEffects(

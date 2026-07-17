@@ -1,6 +1,6 @@
 {
   "name": "shabi-android",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "main": "index.ts",
   "dependencies": {
     "expo": "~57.0.6",
