@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,12 +10,14 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  SafeAreaView,
+  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { File } from 'expo-file-system';
@@ -23,6 +25,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoView, type VideoContentFit } from 'expo-video';
 import { WebView } from 'react-native-webview';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import VideoWallpaper from './modules/video-wallpaper/src/VideoWallpaperModule';
 import {
   apiHeaders,
@@ -54,6 +57,12 @@ import type {
 import { ADMIN_PASSWORD_HASH } from './src/defaultConfig';
 
 type Tab = 'download' | 'library' | 'settings';
+type DownloadUiState = {
+  input: string;
+  busy: boolean;
+  progress: number;
+  status: string;
+};
 
 const colors = {
   background: '#F6F3FB',
@@ -74,6 +83,12 @@ const colors = {
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const STEAM_VIDEO_WORKSHOP_URL = 'https://steamcommunity.com/workshop/browse/?appid=431960&browsesort=trend&section=readytouseitems&p=1&num_per_page=30&days=7&requiredtags%5B%5D=Everyone&requiredtags%5B%5D=Video';
+const INITIAL_DOWNLOAD_STATE: DownloadUiState = {
+  input: '',
+  busy: false,
+  progress: 0,
+  status: '粘贴 Steam 创意工坊链接或输入 Workshop ID。',
+};
 
 function messageOf(error: unknown) {
   return error instanceof Error ? error.message : '操作失败，请稍后重试。';
@@ -114,22 +129,26 @@ function ProgressBar({ value }: { value: number }) {
 }
 
 function DownloadScreen({
+  downloadState,
+  onDownloadStateChange,
   settings,
   onNeedSettings,
   onDownloaded,
   onOpenLibrary,
 }: {
+  downloadState: DownloadUiState;
+  onDownloadStateChange: Dispatch<SetStateAction<DownloadUiState>>;
   settings: ServerSettings;
   onNeedSettings: () => void;
   onDownloaded: (item: WallpaperItem) => Promise<void>;
   onOpenLibrary: () => void;
 }) {
-  const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState('粘贴 Steam 创意工坊链接或输入 Workshop ID。');
+  const { input, busy, progress, status } = downloadState;
   const [browserVisible, setBrowserVisible] = useState(false);
   const workshopPromptOpen = useRef(false);
+  const updateDownloadState = (patch: Partial<DownloadUiState>) => {
+    onDownloadStateChange((current) => ({ ...current, ...patch }));
+  };
 
   const download = async (requestedInput?: string) => {
     if (!settings.serverUrl || !settings.accessKey) {
@@ -146,15 +165,15 @@ function DownloadScreen({
       return;
     }
 
-    setBusy(true);
-    setProgress(3);
-    setStatus('正在提交远程下载任务…');
+    updateDownloadState({ busy: true, progress: 3, status: '正在提交远程下载任务…' });
     try {
       let job = await createJob(settings, workshopId);
       for (let attempt = 0; attempt < 3600 && job.status !== 'ready'; attempt += 1) {
         if (job.status === 'failed') throw new Error(job.message || '服务器下载失败。');
-        setProgress(Math.max(5, Math.min(95, job.progress || 5)));
-        setStatus(job.message || '服务器正在下载壁纸…');
+        updateDownloadState({
+          progress: Math.max(5, Math.min(95, job.progress || 5)),
+          status: job.message || '服务器正在下载壁纸…',
+        });
         await sleep(1000);
         job = await getJob(settings, workshopId);
       }
@@ -162,12 +181,11 @@ function DownloadScreen({
 
       const video = videoDestination(workshopId);
       if (video.exists) video.delete();
-      setProgress(96);
-      setStatus('服务器已准备好，正在传输 MP4…');
+      updateDownloadState({ progress: 96, status: '服务器已准备好，正在传输 MP4…' });
       const task = File.createDownloadTask(fileUrl(settings, workshopId), video, {
         headers: apiHeaders(settings),
         onProgress: ({ bytesWritten, totalBytes }) => {
-          if (totalBytes > 0) setProgress(96 + Math.min(3, (bytesWritten / totalBytes) * 3));
+          if (totalBytes > 0) updateDownloadState({ progress: 96 + Math.min(3, (bytesWritten / totalBytes) * 3) });
         },
       });
       await task.downloadAsync();
@@ -196,18 +214,16 @@ function DownloadScreen({
         addedAt: new Date().toISOString(),
       };
       await onDownloaded(item);
-      setProgress(100);
-      setStatus('下载完成，已经加入壁纸库。');
-      setInput('');
+      updateDownloadState({ input: '', progress: 100, status: '下载完成，已经加入壁纸库。' });
       Alert.alert('下载完成', '视频壁纸已经加入本机壁纸库。', [
         { text: '继续下载' },
         { text: '去壁纸库', onPress: onOpenLibrary },
       ]);
     } catch (error) {
-      setStatus(messageOf(error));
+      updateDownloadState({ status: messageOf(error) });
       Alert.alert('下载失败', messageOf(error));
     } finally {
-      setBusy(false);
+      updateDownloadState({ busy: false });
     }
   };
 
@@ -226,7 +242,7 @@ function DownloadScreen({
           onPress: () => {
             resetPrompt();
             setBrowserVisible(false);
-            setInput(url);
+            updateDownloadState({ input: url });
             setTimeout(() => void download(url), 250);
           },
         },
@@ -264,7 +280,7 @@ function DownloadScreen({
             autoCorrect={false}
             editable={!busy}
             multiline
-            onChangeText={setInput}
+            onChangeText={(value) => updateDownloadState({ input: value })}
             placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id=…"
             placeholderTextColor="#A39BAF"
             style={[styles.input, styles.urlInput]}
@@ -294,7 +310,7 @@ function DownloadScreen({
         </View>
       </ScrollView>
       <Modal animationType="slide" onRequestClose={() => setBrowserVisible(false)} visible={browserVisible}>
-        <SafeAreaView style={styles.browserSafeArea}>
+        <SafeAreaView edges={['top', 'bottom']} style={styles.browserSafeArea}>
           <View style={styles.browserHeader}>
             <View style={styles.flex}>
               <Text style={styles.browserTitle}>Steam 视频壁纸</Text>
@@ -663,12 +679,16 @@ function WallpaperPreview({
   zoom,
   offsetX,
   offsetY,
+  editor = false,
+  containerStyle,
 }: {
   uri: string;
   scaleMode: ScaleMode;
   zoom: number;
   offsetX: number;
   offsetY: number;
+  editor?: boolean;
+  containerStyle?: StyleProp<ViewStyle>;
 }) {
   const player = useVideoPlayer(uri, (instance) => {
     instance.loop = true;
@@ -677,7 +697,7 @@ function WallpaperPreview({
   });
   const contentFit: VideoContentFit = scaleMode === 'contain' ? 'contain' : scaleMode === 'stretch' ? 'fill' : 'cover';
   return (
-    <View style={styles.phonePreview}>
+    <View style={[styles.phonePreview, editor && styles.editorPhonePreview, containerStyle]}>
       <VideoView
         contentFit={contentFit}
         nativeControls={false}
@@ -687,8 +707,8 @@ function WallpaperPreview({
           styles.previewVideo,
           scaleMode === 'custom' && {
             transform: [
-              { translateX: offsetX * 56 },
-              { translateY: offsetY * 90 },
+              { translateX: offsetX * (editor ? 110 : 72) },
+              { translateY: offsetY * (editor ? 180 : 118) },
               { scale: zoom },
             ],
           },
@@ -699,6 +719,101 @@ function WallpaperPreview({
         <Text style={styles.previewDate}>7月17日 · 星期五</Text>
       </View>
     </View>
+  );
+}
+
+function CustomWallpaperEditor({
+  visible,
+  uri,
+  zoom,
+  offsetX,
+  offsetY,
+  onZoomChange,
+  onOffsetXChange,
+  onOffsetYChange,
+  onClose,
+}: {
+  visible: boolean;
+  uri: string;
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
+  onZoomChange: (value: number) => void;
+  onOffsetXChange: (value: number) => void;
+  onOffsetYChange: (value: number) => void;
+  onClose: () => void;
+}) {
+  const dragStart = useRef({ x: 0, y: 0 });
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      dragStart.current = { x: offsetX, y: offsetY };
+    },
+    onPanResponderMove: (_, gesture) => {
+      onOffsetXChange(Math.max(-1, Math.min(1, dragStart.current.x + gesture.dx / 150)));
+      onOffsetYChange(Math.max(-1, Math.min(1, dragStart.current.y + gesture.dy / 260)));
+    },
+  }), [offsetX, offsetY, onOffsetXChange, onOffsetYChange]);
+
+  const reset = () => {
+    onZoomChange(1.15);
+    onOffsetXChange(0);
+    onOffsetYChange(0);
+  };
+
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} visible={visible}>
+      <SafeAreaView edges={['top', 'bottom']} style={styles.customEditorSafeArea}>
+        <View style={styles.customEditorHeader}>
+          <Pressable onPress={onClose} style={styles.editorHeaderButton}>
+            <Text style={styles.editorHeaderButtonText}>取消</Text>
+          </Pressable>
+          <View style={styles.customEditorHeaderCenter}>
+            <Text style={styles.customEditorTitle}>自定义画面</Text>
+            <Text style={styles.customEditorSubtitle}>直接拖动画面调整位置</Text>
+          </View>
+          <Pressable onPress={onClose} style={[styles.editorHeaderButton, styles.editorDoneButton]}>
+            <Text style={[styles.editorHeaderButtonText, styles.editorDoneText]}>完成</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.customEditorPreviewArea}>
+          <View style={styles.customEditorPreviewFrame}>
+            <WallpaperPreview
+              containerStyle={styles.customEditorPreviewFill}
+              editor
+              offsetX={offsetX}
+              offsetY={offsetY}
+              scaleMode="custom"
+              uri={uri}
+              zoom={zoom}
+            />
+            <View {...panResponder.panHandlers} style={styles.customEditorGestureLayer}>
+              <View style={styles.dragHint}><Text style={styles.dragHintText}>↔ 拖动画面定位</Text></View>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.customEditorControls}>
+          <ValueSlider
+            format={(value) => `${value.toFixed(2)}×`}
+            label="画面缩放"
+            maximum={3}
+            minimum={1}
+            onChange={onZoomChange}
+            value={zoom}
+          />
+          <View style={styles.editorPositionRow}>
+            <Text style={styles.editorPositionText}>水平 {Math.round(offsetX * 100)}%</Text>
+            <Text style={styles.editorPositionText}>垂直 {Math.round(offsetY * 100)}%</Text>
+            <Pressable onPress={reset} style={styles.editorResetButton}>
+              <Text style={styles.editorResetText}>恢复居中</Text>
+            </Pressable>
+          </View>
+        </View>
+      </SafeAreaView>
+    </Modal>
   );
 }
 
@@ -722,6 +837,7 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [customEditorVisible, setCustomEditorVisible] = useState(false);
 
   const openSystemPreview = async () => {
     setBusy(true);
@@ -779,16 +895,25 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
                 caption={mode.caption}
                 key={mode.value}
                 label={mode.label}
-                onChange={setScaleMode}
+                onChange={(value) => {
+                  setScaleMode(value);
+                  if (value === 'custom') setCustomEditorVisible(true);
+                }}
                 value={mode.value}
               />
             ))}
           </View>
           {scaleMode === 'custom' && (
             <View style={styles.customPanel}>
-              <ValueSlider format={(value) => `${value.toFixed(2)}×`} label="缩放" maximum={3} minimum={1} onChange={setZoom} value={zoom} />
-              <ValueSlider format={(value) => `${Math.round(value * 100)}%`} label="左右位置" maximum={1} minimum={-1} onChange={setOffsetX} value={offsetX} />
-              <ValueSlider format={(value) => `${Math.round(value * 100)}%`} label="上下位置" maximum={1} minimum={-1} onChange={setOffsetY} value={offsetY} />
+              <View style={styles.customSummaryRow}>
+                <View style={styles.flex}>
+                  <Text style={styles.customSummaryTitle}>缩放 {zoom.toFixed(2)}×</Text>
+                  <Text style={styles.customSummaryCaption}>位置：{Math.round(offsetX * 100)}%，{Math.round(offsetY * 100)}%</Text>
+                </View>
+                <Pressable onPress={() => setCustomEditorVisible(true)} style={styles.customEditButton}>
+                  <Text style={styles.customEditButtonText}>全屏调整</Text>
+                </Pressable>
+              </View>
             </View>
           )}
         </View>
@@ -815,6 +940,17 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
         </Pressable>
         <Text style={styles.systemNote}>动态壁纸默认静音，并会在桌面不可见时暂停播放以节省电量。</Text>
       </ScrollView>
+      <CustomWallpaperEditor
+        offsetX={offsetX}
+        offsetY={offsetY}
+        onClose={() => setCustomEditorVisible(false)}
+        onOffsetXChange={setOffsetX}
+        onOffsetYChange={setOffsetY}
+        onZoomChange={setZoom}
+        uri={item.videoUri}
+        visible={customEditorVisible}
+        zoom={zoom}
+      />
     </View>
   );
 }
@@ -837,13 +973,14 @@ function BottomNavigation({ tab, onChange }: { tab: Tab; onChange: (tab: Tab) =>
   );
 }
 
-export default function App() {
+function AppContent() {
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState<Tab>('download');
   const [settings, setSettings] = useState<ServerSettings>({ serverUrl: '', accessKey: '' });
   const [library, setLibrary] = useState<WallpaperItem[]>([]);
   const [selected, setSelected] = useState<WallpaperItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [downloadState, setDownloadState] = useState<DownloadUiState>(INITIAL_DOWNLOAD_STATE);
 
   const refreshLibrary = useCallback(async () => {
     setRefreshing(true);
@@ -915,7 +1052,7 @@ export default function App() {
 
   if (selected) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView edges={['top', 'bottom']} style={styles.safeArea}>
         <StatusBar style="light" />
         <EnableScreen item={selected} onBack={() => setSelected(null)} />
       </SafeAreaView>
@@ -923,11 +1060,13 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'bottom']} style={styles.safeArea}>
       <StatusBar style="light" />
       <View style={styles.flex}>
         {tab === 'download' && (
           <DownloadScreen
+            downloadState={downloadState}
+            onDownloadStateChange={setDownloadState}
             onDownloaded={addWallpaper}
             onNeedSettings={() => setTab('settings')}
             onOpenLibrary={() => setTab('library')}
@@ -948,6 +1087,14 @@ export default function App() {
         <BottomNavigation onChange={setTab} tab={tab} />
       </View>
     </SafeAreaView>
+  );
+}
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
   );
 }
 
@@ -1038,7 +1185,12 @@ const styles = StyleSheet.create({
   choiceLabel: { color: colors.text, fontSize: 14, fontWeight: '700' },
   choiceLabelActive: { color: colors.primaryDark },
   choiceCaption: { color: colors.muted, fontSize: 11, marginTop: 2 },
-  customPanel: { marginTop: 12, padding: 13, borderRadius: 14, backgroundColor: '#F7F3FD', gap: 10 },
+  customPanel: { marginTop: 12, padding: 13, borderRadius: 14, backgroundColor: '#F7F3FD' },
+  customSummaryRow: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  customSummaryTitle: { color: colors.text, fontSize: 13, fontWeight: '800' },
+  customSummaryCaption: { color: colors.muted, fontSize: 11, marginTop: 3 },
+  customEditButton: { height: 40, borderRadius: 12, backgroundColor: colors.primary, paddingHorizontal: 15, alignItems: 'center', justifyContent: 'center' },
+  customEditButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
   sliderBlock: { gap: 4 },
   sliderLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sliderLabel: { color: colors.text, fontSize: 12, fontWeight: '700' },
@@ -1048,11 +1200,32 @@ const styles = StyleSheet.create({
   sliderFill: { height: 5, borderRadius: 99, backgroundColor: colors.primary },
   sliderThumb: { position: 'absolute', top: -6, width: 17, height: 17, borderRadius: 9, backgroundColor: '#FFFFFF', borderWidth: 4, borderColor: colors.primary, transform: [{ translateX: -8 }] },
   enableContent: { padding: 16, paddingBottom: 40, backgroundColor: colors.background, gap: 14 },
-  phonePreview: { alignSelf: 'center', width: '64%', aspectRatio: 9 / 18.5, borderRadius: 26, overflow: 'hidden', backgroundColor: colors.black, borderWidth: 5, borderColor: '#221B2D' },
+  phonePreview: { alignSelf: 'center', width: '82%', aspectRatio: 9 / 18.5, borderRadius: 30, overflow: 'hidden', backgroundColor: colors.black, borderWidth: 5, borderColor: '#221B2D' },
+  editorPhonePreview: { width: '100%', height: '100%', aspectRatio: undefined, borderRadius: 28 },
   previewVideo: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
   previewClock: { position: 'absolute', left: 0, right: 0, top: 40, alignItems: 'center' },
   previewTime: { color: '#FFFFFF', fontSize: 28, fontWeight: '300', textShadowColor: '#000000AA', textShadowRadius: 4 },
   previewDate: { color: '#FFFFFF', fontSize: 9, marginTop: 1, textShadowColor: '#000000AA', textShadowRadius: 4 },
+  customEditorSafeArea: { flex: 1, backgroundColor: '#171222' },
+  customEditorHeader: { minHeight: 62, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10, backgroundColor: '#211735' },
+  customEditorHeaderCenter: { flex: 1, alignItems: 'center' },
+  customEditorTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '900' },
+  customEditorSubtitle: { color: '#BEB2D5', fontSize: 10, marginTop: 2 },
+  editorHeaderButton: { minWidth: 58, height: 38, borderRadius: 12, backgroundColor: '#FFFFFF12', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
+  editorHeaderButtonText: { color: '#D9CFF0', fontSize: 12, fontWeight: '800' },
+  editorDoneButton: { backgroundColor: colors.primary },
+  editorDoneText: { color: '#FFFFFF' },
+  customEditorPreviewArea: { flex: 1, minHeight: 260, alignItems: 'center', justifyContent: 'center', paddingVertical: 14 },
+  customEditorPreviewFrame: { height: '100%', aspectRatio: 9 / 18.5, position: 'relative' },
+  customEditorPreviewFill: { width: '100%', height: '100%' },
+  customEditorGestureLayer: { position: 'absolute', left: 5, right: 5, top: 5, bottom: 5, borderRadius: 24, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 16 },
+  dragHint: { borderRadius: 99, backgroundColor: '#00000099', paddingHorizontal: 13, paddingVertical: 7 },
+  dragHintText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
+  customEditorControls: { backgroundColor: '#211735', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 18 },
+  editorPositionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
+  editorPositionText: { color: '#BEB2D5', fontSize: 10 },
+  editorResetButton: { marginLeft: 'auto', height: 34, borderRadius: 10, backgroundColor: '#FFFFFF12', paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
+  editorResetText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
   applyButton: { minHeight: 56, backgroundColor: colors.primary, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   applyButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
   systemNote: { color: colors.muted, fontSize: 11, lineHeight: 17, textAlign: 'center', paddingHorizontal: 18 },

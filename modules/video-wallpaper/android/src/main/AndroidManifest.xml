@@ -1,4 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <queries>
+    <intent>
+      <action android:name="android.service.wallpaper.CHANGE_LIVE_WALLPAPER" />
+    </intent>
+    <intent>
+      <action android:name="android.service.wallpaper.LIVE_WALLPAPER_CHOOSER" />
+    </intent>
+  </queries>
   <application>
     <service
       android:name="expo.modules.videowallpaper.VideoWallpaperService"

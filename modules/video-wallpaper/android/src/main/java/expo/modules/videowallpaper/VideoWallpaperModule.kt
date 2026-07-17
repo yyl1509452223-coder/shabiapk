@@ -57,16 +57,20 @@ class VideoWallpaperModule : Module() {
       }
       val chooserIntent = Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER)
       val activity = appContext.throwingActivity
-      val packageManager = activity.packageManager
 
-      // Some Android skins silently ignore the direct component preview. Opening the
-      // system live-wallpaper chooser from the foreground activity is more reliable.
-      val launchIntent = when {
-        chooserIntent.resolveActivity(packageManager) != null -> chooserIntent
-        directPreviewIntent.resolveActivity(packageManager) != null -> directPreviewIntent
-        else -> throw ActivityNotFoundException("系统没有可用的动态壁纸选择器")
+      // Do not rely on resolveActivity here. Android 11+ package visibility and some
+      // OEM launchers may report no resolver even though the system activity can open.
+      try {
+        activity.startActivity(directPreviewIntent)
+      } catch (_: Exception) {
+        try {
+          activity.startActivity(chooserIntent)
+        } catch (fallbackError: Exception) {
+          throw ActivityNotFoundException("系统无法打开动态壁纸预览").apply {
+            initCause(fallbackError)
+          }
+        }
       }
-      activity.startActivity(launchIntent)
 
       mapOf(
         "opened" to true,
