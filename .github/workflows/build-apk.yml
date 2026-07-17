@@ -56,12 +56,12 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Prepare APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk Shabi-Android-v1.0.3.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk Shabi-Android-v1.0.4.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Shabi-Android-v1.0.3-Standalone-APK
-          path: Shabi-Android-v1.0.3.apk
+          name: Shabi-Android-v1.0.4-Standalone-APK
+          path: Shabi-Android-v1.0.4.apk
           if-no-files-found: error
           retention-days: 30
