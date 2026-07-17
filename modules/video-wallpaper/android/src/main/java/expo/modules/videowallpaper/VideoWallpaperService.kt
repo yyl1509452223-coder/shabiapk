@@ -1,6 +1,8 @@
 package expo.modules.videowallpaper
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.Matrix
 import android.net.Uri
 import android.os.Handler
@@ -36,17 +38,28 @@ class VideoWallpaperService : WallpaperService() {
     override fun onSurfaceCreated(holder: SurfaceHolder) {
       super.onSurfaceCreated(holder)
       val frame = holder.surfaceFrame
+      val width = frame.width().takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+      val height = frame.height().takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+      drawCachedFirstFrame(holder, width, height)
       startPlayer(
         holder,
-        frame.width().takeIf { it > 0 } ?: resources.displayMetrics.widthPixels,
-        frame.height().takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        width,
+        height
       )
     }
 
     override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
       super.onSurfaceChanged(holder, format, width, height)
       if (width > 0 && height > 0 && (width != surfaceWidth || height != surfaceHeight)) {
+        drawCachedFirstFrame(holder, width, height)
         startPlayer(holder, width, height)
+      }
+    }
+
+    override fun onSurfaceRedrawNeeded(holder: SurfaceHolder) {
+      super.onSurfaceRedrawNeeded(holder)
+      if (!firstFrameRendered) {
+        drawCachedFirstFrame(holder, surfaceWidth, surfaceHeight)
       }
     }
 
@@ -93,7 +106,7 @@ class VideoWallpaperService : WallpaperService() {
       val generation = playbackGeneration
       firstFrameRendered = false
       currentHolder = holder
-      currentEffectsEnabled = allowEffects
+      currentEffectsEnabled = effects.isNotEmpty()
 
       player = ExoPlayer.Builder(applicationContext).build().also { exoPlayer ->
         exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
@@ -126,10 +139,61 @@ class VideoWallpaperService : WallpaperService() {
           }
         })
         exoPlayer.setVideoSurface(holder.surface)
+        drawCachedFirstFrame(holder, width, height)
         exoPlayer.prepare()
         exoPlayer.playWhenReady = visible || isPreview
       }
-      if (allowEffects && (visible || isPreview)) scheduleRecovery(holder, width, height, generation)
+      if (effects.isNotEmpty() && (visible || isPreview)) scheduleRecovery(holder, width, height, generation)
+    }
+
+    private fun drawCachedFirstFrame(holder: SurfaceHolder, width: Int, height: Int) {
+      if (width <= 0 || height <= 0 || !holder.surface.isValid) return
+      val preferences = getSharedPreferences(VideoWallpaperModule.PREFERENCES_NAME, Context.MODE_PRIVATE)
+      val framePath = preferences.getString(VideoWallpaperModule.KEY_PREVIEW_FRAME_PATH, null) ?: return
+      val bitmap = BitmapFactory.decodeFile(framePath) ?: return
+      val scaleMode = preferences.getString(VideoWallpaperModule.KEY_SCALE_MODE, "cover") ?: "cover"
+      val zoom = preferences.getFloat(VideoWallpaperModule.KEY_ZOOM, 1f).coerceIn(1f, 3f)
+      val offsetX = preferences.getFloat(VideoWallpaperModule.KEY_OFFSET_X, 0f).coerceIn(-1f, 1f)
+      val offsetY = preferences.getFloat(VideoWallpaperModule.KEY_OFFSET_Y, 0f).coerceIn(-1f, 1f)
+      var canvas: android.graphics.Canvas? = null
+      try {
+        val lockedCanvas = holder.lockCanvas()
+        canvas = lockedCanvas
+        lockedCanvas.drawColor(Color.BLACK)
+        val matrix = Matrix()
+        if (scaleMode == "stretch") {
+          matrix.setScale(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
+        } else {
+          val widthScale = width.toFloat() / bitmap.width.toFloat()
+          val heightScale = height.toFloat() / bitmap.height.toFloat()
+          var scale = if (scaleMode == "contain") {
+            minOf(widthScale, heightScale)
+          } else {
+            maxOf(widthScale, heightScale)
+          }
+          if (scaleMode == "custom") scale *= zoom
+          val scaledWidth = bitmap.width * scale
+          val scaledHeight = bitmap.height * scale
+          val overflowX = (scaledWidth - width).coerceAtLeast(0f)
+          val overflowY = (scaledHeight - height).coerceAtLeast(0f)
+          val left = (width - scaledWidth) / 2f + offsetX * overflowX / 2f
+          val top = (height - scaledHeight) / 2f + offsetY * overflowY / 2f
+          matrix.setScale(scale, scale)
+          matrix.postTranslate(left, top)
+        }
+        lockedCanvas.drawBitmap(bitmap, matrix, null)
+      } catch (_: Exception) {
+        // The video decoder will still render even if a vendor surface rejects canvas drawing.
+      } finally {
+        if (canvas != null) {
+          try {
+            holder.unlockCanvasAndPost(canvas)
+          } catch (_: Exception) {
+            // Surface may have been replaced by the system preview while drawing.
+          }
+        }
+        bitmap.recycle()
+      }
     }
 
     private fun createEffects(
@@ -181,6 +245,6 @@ class VideoWallpaperService : WallpaperService() {
   }
 
   companion object {
-    private const val FIRST_FRAME_TIMEOUT_MS = 2500L
+    private const val FIRST_FRAME_TIMEOUT_MS = 1800L
   }
 }
