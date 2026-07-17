@@ -44,9 +44,11 @@ import {
   importLocalVideo,
   loadLibrary,
   loadServerSettings,
+  loadWallpaperFrameRate,
   previewDestination,
   saveLibrary,
   saveServerSettings,
+  saveWallpaperFrameRate,
   videoDestination,
 } from './src/storage';
 import type {
@@ -433,9 +435,15 @@ function LibraryScreen({
 function SettingsScreen({
   settings,
   onSaved,
+  frameRate,
+  maximumFrameRate,
+  onFrameRateChange,
 }: {
   settings: ServerSettings;
   onSaved: (settings: ServerSettings) => void;
+  frameRate: number;
+  maximumFrameRate: number;
+  onFrameRateChange: (frameRate: number) => void;
 }) {
   const [serverUrl, setServerUrl] = useState(settings.serverUrl);
   const [accessKey, setAccessKey] = useState(settings.accessKey);
@@ -504,6 +512,7 @@ function SettingsScreen({
       <PageHeader title="服务器设置" subtitle="管理员验证后才可查看服务器配置" />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.lockedPageContent} keyboardShouldPersistTaps="handled">
+          <FrameRateCard frameRate={frameRate} maximumFrameRate={maximumFrameRate} onChange={onFrameRateChange} />
           <View style={styles.lockIcon}><Text style={styles.lockIconText}>🔒</Text></View>
           <Text style={styles.lockTitle}>服务器配置已隐藏</Text>
           <Text style={styles.lockCaption}>请输入管理员密码后查看或修改服务器地址和访问密钥。</Text>
@@ -539,6 +548,7 @@ function SettingsScreen({
       <PageHeader title="服务器设置" subtitle="连接你现有的 ShabiServer 远程下载服务" />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.pageContent} keyboardShouldPersistTaps="handled">
+          <FrameRateCard frameRate={frameRate} maximumFrameRate={maximumFrameRate} onChange={onFrameRateChange} />
           {connected && (
             <View style={styles.noticeSuccess}>
               <View style={styles.noticeDot} />
@@ -624,6 +634,7 @@ function ValueSlider({
   maximum,
   onChange,
   format,
+  step,
 }: {
   label: string;
   value: number;
@@ -631,12 +642,27 @@ function ValueSlider({
   maximum: number;
   onChange: (value: number) => void;
   format: (value: number) => string;
+  step?: number;
 }) {
   const [trackWidth, setTrackWidth] = useState(1);
+  const sliderRef = useRef<View>(null);
+  const trackLeft = useRef(0);
+  const measured = useRef(false);
   const ratio = (value - minimum) / (maximum - minimum);
-  const update = (event: GestureResponderEvent) => {
-    const nextRatio = Math.max(0, Math.min(1, event.nativeEvent.locationX / trackWidth));
-    onChange(minimum + nextRatio * (maximum - minimum));
+  const updateFromPageX = (pageX: number, width = trackWidth, left = trackLeft.current) => {
+    if (!measured.current || width <= 0) return;
+    const nextRatio = Math.max(0, Math.min(1, (pageX - left) / width));
+    const raw = minimum + nextRatio * (maximum - minimum);
+    const next = step ? Math.round(raw / step) * step : raw;
+    onChange(Math.max(minimum, Math.min(maximum, next)));
+  };
+  const measureTrack = (pageX?: number) => {
+    sliderRef.current?.measureInWindow((left, _top, width) => {
+      trackLeft.current = left;
+      measured.current = true;
+      if (width > 0) setTrackWidth(width);
+      if (pageX !== undefined) updateFromPageX(pageX, width, left);
+    });
   };
   return (
     <View style={styles.sliderBlock}>
@@ -646,11 +672,16 @@ function ValueSlider({
       </View>
       <View
         accessibilityRole="adjustable"
-        onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+        onLayout={(event) => {
+          setTrackWidth(event.nativeEvent.layout.width);
+          requestAnimationFrame(() => measureTrack());
+        }}
         onMoveShouldSetResponder={() => true}
-        onResponderGrant={update}
-        onResponderMove={update}
+        onResponderGrant={(event) => measureTrack(event.nativeEvent.pageX)}
+        onResponderMove={(event) => updateFromPageX(event.nativeEvent.pageX)}
+        onResponderTerminationRequest={() => false}
         onStartShouldSetResponder={() => true}
+        ref={sliderRef}
         style={styles.sliderTouch}
       >
         <View style={styles.sliderTrack}>
@@ -658,6 +689,34 @@ function ValueSlider({
           <View style={[styles.sliderThumb, { left: `${ratio * 100}%` }]} />
         </View>
       </View>
+    </View>
+  );
+}
+
+function FrameRateCard({
+  frameRate,
+  maximumFrameRate,
+  onChange,
+}: {
+  frameRate: number;
+  maximumFrameRate: number;
+  onChange: (frameRate: number) => void;
+}) {
+  return (
+    <View style={[styles.card, styles.frameRateCard]}>
+      <Text style={styles.fieldLabel}>壁纸帧率</Text>
+      <Text style={styles.frameRateCaption}>
+        可选 30–{Math.round(maximumFrameRate)} FPS；实际流畅度不会超过视频源本身的帧率。
+      </Text>
+      <ValueSlider
+        format={(value) => `${Math.round(value)} FPS`}
+        label="播放上限"
+        maximum={maximumFrameRate}
+        minimum={30}
+        onChange={onChange}
+        step={1}
+        value={frameRate}
+      />
     </View>
   );
 }
@@ -808,7 +867,7 @@ const scaleModes: Array<{ value: ScaleMode; label: string; caption: string }> = 
   { value: 'custom', label: '用户自定义', caption: '缩放并调整画面中心位置' },
 ];
 
-function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => void }) {
+function EnableScreen({ item, onBack, frameRate }: { item: WallpaperItem; onBack: () => void; frameRate: number }) {
   const [scaleMode, setScaleMode] = useState<ScaleMode>('cover');
   const [zoom, setZoom] = useState(1.15);
   const [offsetX, setOffsetX] = useState(0);
@@ -827,13 +886,14 @@ function EnableScreen({ item, onBack }: { item: WallpaperItem; onBack: () => voi
       if (Platform.OS !== 'android' || !VideoWallpaper.isSupported()) {
         throw new Error('这台设备不支持 Android 动态壁纸。');
       }
-      const options: WallpaperOptions = { uri: item.videoUri, scaleMode, zoom, offsetX, offsetY, target: 'home' };
+      const options: WallpaperOptions = { uri: item.videoUri, scaleMode, zoom, offsetX, offsetY, frameRate, target: 'home' };
       await VideoWallpaper.setVideoWallpaper(
         options.uri,
         options.scaleMode,
         options.zoom,
         options.offsetX,
         options.offsetY,
+        options.frameRate,
         options.target,
       );
     } catch (error) {
@@ -1063,6 +1123,8 @@ function AppContent() {
   const [selected, setSelected] = useState<WallpaperItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [downloadState, setDownloadState] = useState<DownloadUiState>(INITIAL_DOWNLOAD_STATE);
+  const [maximumFrameRate, setMaximumFrameRate] = useState(60);
+  const [wallpaperFrameRate, setWallpaperFrameRate] = useState(60);
   const [startupReadiness, setStartupReadiness] = useState<WallpaperReadiness | null>(null);
   const [startupPermissionVisible, setStartupPermissionVisible] = useState(false);
 
@@ -1092,9 +1154,18 @@ function AppContent() {
 
   useEffect(() => {
     void (async () => {
-      const [savedSettings, savedLibrary] = await Promise.all([loadServerSettings(), loadLibrary()]);
+      const detectedMaximum = Platform.OS === 'android'
+        ? Math.max(30, Math.round(VideoWallpaper.getMaximumRefreshRate()))
+        : 60;
+      const [savedSettings, savedLibrary, savedFrameRate] = await Promise.all([
+        loadServerSettings(),
+        loadLibrary(),
+        loadWallpaperFrameRate(),
+      ]);
       setSettings(savedSettings);
       setLibrary(savedLibrary);
+      setMaximumFrameRate(detectedMaximum);
+      setWallpaperFrameRate(Math.max(30, Math.min(detectedMaximum, Math.round(savedFrameRate ?? Math.min(60, detectedMaximum)))));
       if (!savedSettings.serverUrl || !savedSettings.accessKey) setTab('settings');
       setReady(true);
       refreshStartupPermissions(true);
@@ -1125,6 +1196,12 @@ function AppContent() {
     const next = [item, ...current.filter((existing) => existing.id !== item.id)];
     await saveLibrary(next);
     setLibrary(next);
+  };
+
+  const changeWallpaperFrameRate = (value: number) => {
+    const next = Math.max(30, Math.min(maximumFrameRate, Math.round(value)));
+    setWallpaperFrameRate(next);
+    void saveWallpaperFrameRate(next);
   };
 
   const importVideo = async () => {
@@ -1173,7 +1250,14 @@ function AppContent() {
     return (
       <SafeAreaView edges={['top', 'bottom']} style={styles.safeArea}>
         <StatusBar style="light" />
-        <EnableScreen item={selected} onBack={() => setSelected(null)} />
+        <EnableScreen
+          frameRate={wallpaperFrameRate}
+          item={selected}
+          onBack={() => {
+            setSelected(null);
+            setTab('library');
+          }}
+        />
       </SafeAreaView>
     );
   }
@@ -1202,7 +1286,15 @@ function AppContent() {
             refreshing={refreshing}
           />
         )}
-        {tab === 'settings' && <SettingsScreen onSaved={setSettings} settings={settings} />}
+        {tab === 'settings' && (
+          <SettingsScreen
+            frameRate={wallpaperFrameRate}
+            maximumFrameRate={maximumFrameRate}
+            onFrameRateChange={changeWallpaperFrameRate}
+            onSaved={setSettings}
+            settings={settings}
+          />
+        )}
         <BottomNavigation onChange={setTab} tab={tab} />
       </View>
       <StartupPermissionModal
@@ -1245,6 +1337,8 @@ const styles = StyleSheet.create({
   pageSubtitle: { color: '#E3DDF8', fontSize: 12, marginTop: 3 },
   pageContent: { padding: 16, paddingBottom: 34, backgroundColor: colors.background, gap: 14 },
   card: { backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: 18, padding: 16 },
+  frameRateCard: { width: '100%' },
+  frameRateCaption: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 6, marginBottom: 12 },
   cardMuted: { backgroundColor: colors.panelSoft, borderRadius: 16, padding: 16 },
   sectionTitle: { color: colors.text, fontSize: 17, fontWeight: '800' },
   sectionCaption: { color: colors.muted, fontSize: 13, lineHeight: 20, marginTop: 4 },

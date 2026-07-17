@@ -5,6 +5,7 @@ import { DEFAULT_ACCESS_KEY, DEFAULT_SERVER_URL } from './defaultConfig';
 
 const SERVER_URL_KEY = 'shabi-server-url';
 const ACCESS_KEY_KEY = 'shabi-access-key';
+const WALLPAPER_FRAME_RATE_KEY = 'shabi-wallpaper-frame-rate';
 const rootDirectory = new Directory(Paths.document, 'shabi-wallpapers');
 const videoDirectory = new Directory(rootDirectory, 'videos');
 const previewDirectory = new Directory(rootDirectory, 'previews');
@@ -34,6 +35,17 @@ export async function saveServerSettings(settings: ServerSettings) {
     SecureStore.setItemAsync(SERVER_URL_KEY, settings.serverUrl.trim().replace(/\/+$/, '')),
     SecureStore.setItemAsync(ACCESS_KEY_KEY, settings.accessKey.trim()),
   ]);
+}
+
+export async function loadWallpaperFrameRate(): Promise<number | null> {
+  const stored = await SecureStore.getItemAsync(WALLPAPER_FRAME_RATE_KEY);
+  if (!stored) return null;
+  const value = Number(stored);
+  return Number.isFinite(value) ? value : null;
+}
+
+export async function saveWallpaperFrameRate(frameRate: number) {
+  await SecureStore.setItemAsync(WALLPAPER_FRAME_RATE_KEY, String(Math.round(frameRate)));
 }
 
 export async function loadLibrary(): Promise<WallpaperItem[]> {

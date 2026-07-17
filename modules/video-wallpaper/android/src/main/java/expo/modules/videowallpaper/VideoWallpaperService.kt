@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.service.wallpaper.WallpaperService
+import android.view.Surface
 import android.view.SurfaceHolder
 import androidx.media3.common.C
 import androidx.media3.common.Effect
@@ -94,6 +95,7 @@ class VideoWallpaperService : WallpaperService() {
       val zoom = preferences.getFloat(VideoWallpaperModule.KEY_ZOOM, 1f).coerceIn(1f, 3f)
       val offsetX = preferences.getFloat(VideoWallpaperModule.KEY_OFFSET_X, 0f).coerceIn(-1f, 1f)
       val offsetY = preferences.getFloat(VideoWallpaperModule.KEY_OFFSET_Y, 0f).coerceIn(-1f, 1f)
+      val frameRate = preferences.getFloat(VideoWallpaperModule.KEY_FRAME_RATE, 60f).coerceIn(30f, 240f)
 
       releasePlayer()
       playbackGeneration += 1
@@ -105,6 +107,12 @@ class VideoWallpaperService : WallpaperService() {
       firstFrameRendered = false
       currentHolder = holder
       currentEffectsEnabled = effects.isNotEmpty()
+
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        runCatching {
+          holder.surface.setFrameRate(frameRate, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
+        }
+      }
 
       player = ExoPlayer.Builder(applicationContext).build().also { exoPlayer ->
         exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))

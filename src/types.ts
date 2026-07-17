@@ -37,5 +37,6 @@ export type WallpaperOptions = {
   zoom: number;
   offsetX: number;
   offsetY: number;
+  frameRate: number;
   target: WallpaperTarget;
 };

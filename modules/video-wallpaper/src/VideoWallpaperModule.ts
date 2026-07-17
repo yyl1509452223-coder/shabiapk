@@ -23,6 +23,7 @@ export type WallpaperReadiness = {
 
 declare class VideoWallpaperModule extends NativeModule<{}> {
   isSupported(): boolean;
+  getMaximumRefreshRate(): number;
   getReadiness(): WallpaperReadiness;
   openAppSettings(): Promise<void>;
   openPermissionSettings(kind: 'lockScreen' | 'overlay' | 'wallpaper'): Promise<void>;
@@ -33,6 +34,7 @@ declare class VideoWallpaperModule extends NativeModule<{}> {
     zoom: number,
     offsetX: number,
     offsetY: number,
+    frameRate: number,
     target: WallpaperOptions['target'],
   ): Promise<SetWallpaperResult>;
 }

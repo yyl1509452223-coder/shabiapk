@@ -14,6 +14,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import android.view.WindowManager
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
@@ -32,6 +33,17 @@ class VideoWallpaperModule : Module() {
     Function("isSupported") {
       val manager = WallpaperManager.getInstance(context)
       manager.isWallpaperSupported && manager.isSetWallpaperAllowed
+    }
+
+    @Suppress("DEPRECATION")
+    Function("getMaximumRefreshRate") {
+      val display = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay
+      val maximum = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        display.supportedModes.maxOfOrNull { it.refreshRate.toDouble() }
+      } else {
+        null
+      }
+      (maximum ?: display.refreshRate.toDouble()).coerceAtLeast(30.0)
     }
 
     Function("getReadiness") {
@@ -86,6 +98,7 @@ class VideoWallpaperModule : Module() {
         zoom: Double,
         offsetX: Double,
         offsetY: Double,
+        frameRate: Double,
         target: String ->
       val parsedUri = Uri.parse(uri)
       if (parsedUri.scheme != "file" || parsedUri.path.isNullOrBlank()) {
@@ -104,6 +117,7 @@ class VideoWallpaperModule : Module() {
         .putFloat(KEY_ZOOM, zoom.toFloat().coerceIn(1f, 3f))
         .putFloat(KEY_OFFSET_X, offsetX.toFloat().coerceIn(-1f, 1f))
         .putFloat(KEY_OFFSET_Y, offsetY.toFloat().coerceIn(-1f, 1f))
+        .putFloat(KEY_FRAME_RATE, frameRate.toFloat().coerceIn(30f, 240f))
         .putString(KEY_TARGET, safeTarget)
       if (preferences.getString(KEY_PREPARED_VIDEO_URI, null) != uri) {
         editor.remove(KEY_PREPARED_VIDEO_URI).remove(KEY_PREVIEW_FRAME_PATH)
@@ -303,6 +317,7 @@ class VideoWallpaperModule : Module() {
     const val KEY_ZOOM = "zoom"
     const val KEY_OFFSET_X = "offset_x"
     const val KEY_OFFSET_Y = "offset_y"
+    const val KEY_FRAME_RATE = "frame_rate"
     const val KEY_TARGET = "target"
     const val KEY_PREPARED_VIDEO_URI = "prepared_video_uri"
     const val KEY_PREVIEW_FRAME_PATH = "preview_frame_path"
