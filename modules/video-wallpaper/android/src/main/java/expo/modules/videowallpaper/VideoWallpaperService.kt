@@ -5,6 +5,7 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
 import androidx.media3.common.C
@@ -62,7 +63,7 @@ class VideoWallpaperService : WallpaperService() {
 
     override fun onVisibilityChanged(isVisible: Boolean) {
       visible = isVisible
-      val shouldPlay = isVisible || isPreview
+      val shouldPlay = shouldKeepPlaying()
       player?.playWhenReady = shouldPlay
       if (shouldPlay) {
         player?.play()
@@ -123,7 +124,10 @@ class VideoWallpaperService : WallpaperService() {
           }
 
           override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_READY && (visible || isPreview)) exoPlayer.play()
+            if (playbackState == Player.STATE_READY && shouldKeepPlaying()) {
+              exoPlayer.playWhenReady = true
+              exoPlayer.play()
+            }
           }
 
           override fun onPlayerError(error: PlaybackException) {
@@ -140,7 +144,15 @@ class VideoWallpaperService : WallpaperService() {
         exoPlayer.playWhenReady = true
         exoPlayer.play()
       }
-      if (effects.isNotEmpty() && (visible || isPreview)) scheduleRecovery(holder, width, height, generation)
+      if (effects.isNotEmpty() && shouldKeepPlaying()) scheduleRecovery(holder, width, height, generation)
+    }
+
+    private fun shouldKeepPlaying(): Boolean {
+      val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+      // HyperOS can report the live-wallpaper preview as invisible even while it is
+      // displayed. Keep decoding while the screen is interactive and the Surface exists.
+      return currentHolder?.surface?.isValid == true &&
+        (visible || isPreview || powerManager.isInteractive)
     }
 
     private fun createEffects(

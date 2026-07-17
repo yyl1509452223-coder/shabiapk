@@ -2,7 +2,7 @@
   "expo": {
     "name": "鲨壁",
     "slug": "shabi-android",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.colorfulshark.shabi",
-      "versionCode": 9,
+      "versionCode": 10,
       "adaptiveIcon": {
         "backgroundColor": "#4B2E94",
         "foregroundImage": "./assets/android-icon-foreground.png",
